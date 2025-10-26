@@ -1,9 +1,10 @@
-modules = ["nodejs-20", "web"]
+modules = ["nodejs-20", "web", "python-3.11"]
 [agent]
 expertMode = true
 
 [nix]
 channel = "stable-25_05"
+packages = ["ffmpeg"]
 
 [deployment]
 deploymentTarget = "autoscale"
@@ -37,7 +38,3 @@ outputType = "webview"
 [[ports]]
 localPort = 5000
 externalPort = 80
-
-[[ports]]
-localPort = 39647
-externalPort = 3000
