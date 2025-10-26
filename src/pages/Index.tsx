@@ -38,7 +38,7 @@ const Index = () => {
     setIsLoading(true);
     setCurrentUrl(url);
     try {
-      const response = await fetch("http://localhost:5001/api/resolutions", {
+      const response = await fetch("http://localhost:8000/api/resolutions", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -73,7 +73,7 @@ const Index = () => {
     if (!selectedResolution || !currentUrl) return;
     
     try {
-      const response = await fetch("http://localhost:5001/api/download", {
+      const response = await fetch("http://localhost:8000/api/download", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
