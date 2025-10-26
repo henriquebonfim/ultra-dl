@@ -37,6 +37,11 @@ const Index = () => {
   const handleValidate = async (url: string) => {
     setIsLoading(true);
     setCurrentUrl(url);
+    setIsValidated(false);
+    setSelectedResolution(null);
+    setAvailableResolutions([]);
+    setVideoMeta(null);
+    
     try {
       const response = await fetch("http://localhost:8000/api/resolutions", {
         method: "POST",
