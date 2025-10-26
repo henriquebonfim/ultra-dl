@@ -1,41 +1,44 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Download, Loader2, CheckCircle2 } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
+
+interface Resolution {
+  format_id: string;
+  ext: string;
+  resolution: string;
+  height: number;
+  note: string;
+  filesize: number | null;
+  vcodec: string;
+  acodec: string;
+}
+
+interface VideoMeta {
+  id: string;
+  title: string;
+  uploader: string;
+  duration: number;
+  thumbnail: string;
+}
 
 interface DownloadButtonProps {
   disabled: boolean;
   onDownload: () => void;
+  selectedResolution: Resolution | null;
+  videoMeta: VideoMeta | null;
 }
 
-export const DownloadButton = ({ disabled, onDownload }: DownloadButtonProps) => {
+export const DownloadButton = ({ disabled, onDownload, selectedResolution, videoMeta }: DownloadButtonProps) => {
   const [isDownloading, setIsDownloading] = useState(false);
-  const [isComplete, setIsComplete] = useState(false);
-  const [progress, setProgress] = useState(0);
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     setIsDownloading(true);
-    setProgress(0);
-    onDownload();
-
-    // Simulate download progress
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setIsDownloading(false);
-          setIsComplete(true);
-          return 100;
-        }
-        return prev + 10;
-      });
-    }, 300);
-  };
-
-  const handleFinalDownload = () => {
-    // This would trigger the actual file download
-    window.open("https://example.com/video.mp4", "_blank");
+    try {
+      await onDownload();
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   return (
@@ -46,7 +49,7 @@ export const DownloadButton = ({ disabled, onDownload }: DownloadButtonProps) =>
       className="w-full max-w-2xl mx-auto"
     >
       <AnimatePresence mode="wait">
-        {!isDownloading && !isComplete && (
+        {!isDownloading && (
           <motion.div
             key="download-button"
             initial={{ opacity: 0 }}
@@ -55,13 +58,19 @@ export const DownloadButton = ({ disabled, onDownload }: DownloadButtonProps) =>
           >
             <Button
               onClick={handleDownload}
-              disabled={disabled}
+              disabled={disabled || isDownloading}
               className="w-full py-6 text-lg font-bold gradient-primary shadow-glow hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
               size="lg"
+              data-testid="button-download"
             >
               <Download className="mr-2 h-6 w-6" />
-              Start Download
+              Download {selectedResolution?.resolution || "Video"}
             </Button>
+            {selectedResolution && videoMeta && (
+              <p className="text-center text-sm text-muted-foreground mt-3" data-testid="text-download-info">
+                Ready to download: {videoMeta.title} ({selectedResolution.resolution})
+              </p>
+            )}
           </motion.div>
         )}
 
@@ -72,44 +81,15 @@ export const DownloadButton = ({ disabled, onDownload }: DownloadButtonProps) =>
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
             className="bg-card rounded-2xl p-6 border border-border shadow-card"
+            data-testid="status-downloading"
           >
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-3">
               <Loader2 className="h-6 w-6 text-primary animate-spin" />
               <div>
-                <h3 className="font-semibold">Processing your video...</h3>
-                <p className="text-sm text-muted-foreground">Please wait while we prepare your download</p>
+                <h3 className="font-semibold">Downloading your video...</h3>
+                <p className="text-sm text-muted-foreground">This may take a moment depending on the video size</p>
               </div>
             </div>
-            <Progress value={progress} className="h-2" />
-            <p className="text-right text-sm text-muted-foreground mt-2">{progress}%</p>
-          </motion.div>
-        )}
-
-        {isComplete && (
-          <motion.div
-            key="complete"
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            className="bg-card rounded-2xl p-6 border-2 border-success shadow-card"
-          >
-            <div className="flex items-center gap-3 mb-4">
-              <div className="bg-success/20 rounded-full p-2">
-                <CheckCircle2 className="h-6 w-6 text-success" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-success">Your video is ready!</h3>
-                <p className="text-sm text-muted-foreground">Click below to download your file</p>
-              </div>
-            </div>
-            <Button
-              onClick={handleFinalDownload}
-              className="w-full py-6 text-base font-semibold bg-success hover:bg-success/90 text-success-foreground"
-              size="lg"
-            >
-              <Download className="mr-2 h-5 w-5" />
-              Download Video
-            </Button>
           </motion.div>
         )}
       </AnimatePresence>

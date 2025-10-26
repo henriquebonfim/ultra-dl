@@ -7,9 +7,10 @@ import { toast } from "sonner";
 
 interface UrlInputProps {
   onValidate: (url: string) => void;
+  isLoading?: boolean;
 }
 
-export const UrlInput = ({ onValidate }: UrlInputProps) => {
+export const UrlInput = ({ onValidate, isLoading = false }: UrlInputProps) => {
   const [url, setUrl] = useState("");
   const [isInvalid, setIsInvalid] = useState(false);
 
@@ -61,15 +62,18 @@ export const UrlInput = ({ onValidate }: UrlInputProps) => {
                   ? "border-destructive focus-visible:ring-destructive"
                   : "border-border focus-visible:ring-primary"
               }`}
+              data-testid="input-youtube-url"
             />
           </div>
           <Button
             onClick={handleCheck}
+            disabled={isLoading}
             className="w-full py-6 text-base font-semibold gradient-primary shadow-glow hover:opacity-90 transition-opacity"
             size="lg"
+            data-testid="button-check-video"
           >
             <Search className="mr-2 h-5 w-5" />
-            Check Video
+            {isLoading ? "Checking..." : "Check Video"}
           </Button>
         </div>
       </div>
