@@ -65,7 +65,7 @@ const Index = () => {
       setIsLoading(false);
     } catch (error) {
       console.error("Error fetching resolutions:", error);
-      toast.error("Failed to connect to the backend. Make sure it's running.");
+      toast.error(`Failed to connect to the backend. Make sure it's running.`);
       setIsLoading(false);
     }
   };
