@@ -1,0 +1,37 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - FLASK_ENV=${FLASK_ENV}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./backend:/app
+      - /tmp/ultra-dl:/tmp/ultra-dl
+    restart: unless-stopped
+    networks:
+      - gateway
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - VITE_API_URL=${VITE_API_URL}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - gateway
+
+networks:
+  gateway:
+    driver: bridge

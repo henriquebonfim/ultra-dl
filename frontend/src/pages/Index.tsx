@@ -1,10 +1,10 @@
-import { useState } from "react";
-import { Header } from "@/components/Header";
 import { AdBanner } from "@/components/AdBanner";
-import { UrlInput } from "@/components/UrlInput";
-import { ResolutionPicker } from "@/components/ResolutionPicker";
 import { DownloadButton } from "@/components/DownloadButton";
 import { Footer } from "@/components/Footer";
+import { Header } from "@/components/Header";
+import { ResolutionPicker } from "@/components/ResolutionPicker";
+import { UrlInput } from "@/components/UrlInput";
+import { useState } from "react";
 import { toast } from "sonner";
 
 interface Resolution {
@@ -34,6 +34,8 @@ const Index = () => {
   const [currentUrl, setCurrentUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
   const handleValidate = async (url: string) => {
     setIsLoading(true);
     setCurrentUrl(url);
@@ -41,9 +43,9 @@ const Index = () => {
     setSelectedResolution(null);
     setAvailableResolutions([]);
     setVideoMeta(null);
-    
+
     try {
-      const response = await fetch("http://localhost:8000/api/resolutions", {
+      const response = await fetch(`${API_URL}/api/resolutions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -76,9 +78,9 @@ const Index = () => {
 
   const handleDownload = async () => {
     if (!selectedResolution || !currentUrl) return;
-    
+
     try {
-      const response = await fetch("http://localhost:8000/api/download", {
+      const response = await fetch(`${API_URL}/api/download`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -114,13 +116,13 @@ const Index = () => {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      
+
       <main className="flex-1 w-full px-4 pb-8">
         <div className="max-w-7xl mx-auto space-y-12">
           <AdBanner position="top" />
-          
+
           <UrlInput onValidate={handleValidate} isLoading={isLoading} />
-          
+
           {isValidated && availableResolutions.length > 0 && (
             <>
               {videoMeta && (
@@ -129,13 +131,13 @@ const Index = () => {
                   <p className="text-sm text-muted-foreground" data-testid="text-video-uploader">{videoMeta.uploader}</p>
                 </div>
               )}
-              
+
               <ResolutionPicker
                 onSelect={handleSelectResolution}
                 selectedResolution={selectedResolution}
                 availableResolutions={availableResolutions}
               />
-              
+
               <DownloadButton
                 disabled={!selectedResolution}
                 onDownload={handleDownload}
@@ -144,11 +146,11 @@ const Index = () => {
               />
             </>
           )}
-          
+
           <AdBanner position="bottom" />
         </div>
       </main>
-      
+
       <Footer />
     </div>
   );

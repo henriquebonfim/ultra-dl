@@ -1,73 +1,161 @@
-# Welcome to your Lovable project
+# UltraDL - YouTube Video Downloader
 
-## Project info
+## Overview
 
-**URL**: https://lovable.dev/projects/3df718ab-d92a-46ab-837e-c365007ea84e
+UltraDL is a web-based YouTube video downloader application that allows users to download videos in various resolutions up to 8K. The application consists of a React-based frontend with a Flask/Python backend that leverages yt-dlp for video processing.
 
-## How can I edit this code?
+**Core Functionality:**
+- URL validation for YouTube videos
+- Resolution/format selection from available video formats
+- Video downloading with format/resolution preferences
+- Support for high-resolution videos (4K/8K)
 
-There are several ways of editing your application.
+**Technology Stack:**
+- Frontend: React + TypeScript + Vite
+- UI Framework: shadcn/ui with Radix UI primitives
+- Styling: Tailwind CSS with custom dark theme
+- Backend: Flask (Python)
+- Video Processing: yt-dlp + ffmpeg
+- State Management: TanStack Query (React Query)
 
-**Use Lovable**
+## User Preferences
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/3df718ab-d92a-46ab-837e-c365007ea84e) and start prompting.
+Preferred communication style: Simple, everyday language.
 
-Changes made via Lovable will be committed automatically to this repo.
+## System Architecture
 
-**Use your preferred IDE**
+### Frontend Architecture
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+**Build System:**
+- Vite as the build tool and development server
+- TypeScript for type safety with relaxed strict mode settings
+- React 18 with React Router for client-side routing
+- SWC plugin for fast React refresh during development
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+**Component Structure:**
+- Component-based architecture using React functional components
+- shadcn/ui design system for consistent UI components
+- Radix UI primitives for accessible, unstyled components
+- Framer Motion for animations and transitions
+- Path aliases configured (@/ maps to ./src/) for clean imports
 
-Follow these steps:
+**Styling Approach:**
+- Tailwind CSS with CSS variables for theming
+- Dark mode as the primary theme (defined in index.css)
+- Custom color system using HSL values for design tokens
+- CSS custom properties for gradients and shadows
+- Responsive design with mobile-first breakpoints
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+**State Management:**
+- TanStack Query (React Query) for server state and API calls
+- Local component state with React hooks
+- No global state management library (Redux/Zustand) currently implemented
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+**Key Pages:**
+- Index (/) - Main application page with video download workflow
+- NotFound (*) - Catch-all 404 error page
 
-# Step 3: Install the necessary dependencies.
-npm i
+**Component Organization:**
+- UI components in src/components/ui/ (shadcn/ui library)
+- Feature components in src/components/ (AdBanner, DownloadButton, Footer, Header, ResolutionPicker, UrlInput)
+- Hooks in src/hooks/ (use-mobile, use-toast)
+- Utility functions in src/lib/utils.ts
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+### Backend Architecture
 
-**Edit a file directly in GitHub**
+**Framework:**
+- Single-file Flask application (backend.py)
+- Flask-CORS enabled for cross-origin requests from the frontend
+- Designed for local development/testing only
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+**API Endpoints:**
+- `/api/resolutions` (POST) - Fetches available video formats/resolutions for a given YouTube URL
+- `/api/download` (POST) - Downloads selected video format and streams it to the client
+- `/health` (GET) - Health check endpoint for backend status
 
-**Use GitHub Codespaces**
+**Video Processing:**
+- yt-dlp library for YouTube metadata extraction and video downloading
+- ffmpeg (system dependency) for video/audio merging and processing
+- Temporary file handling using tempfile.mkdtemp() for per-request isolation
+- Automatic cleanup scheduling with configurable delay (CLEANUP_DELAY_SECONDS)
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+**Safety Features:**
+- Optional file size limits (MAX_RETURN_FILE_SIZE)
+- Temporary directory cleanup to prevent disk space issues
+- Thread-based cleanup scheduling for downloaded files
 
-## What technologies are used for this project?
+**Design Decisions:**
+- Single-file backend for simplicity and local development
+- Not production-ready (lacks authentication, rate limiting, and security hardening)
+- Stateless request handling with ephemeral temporary directories
 
-This project is built with:
+### Data Flow
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+1. User enters YouTube URL in frontend
+2. Frontend validates URL format client-side
+3. Frontend POSTs URL to backend `/api/resolutions` endpoint (port 8000)
+4. Backend uses yt-dlp to extract video metadata and available formats
+5. Backend returns format list with metadata (title, uploader, thumbnail, formats)
+6. Frontend displays video information and available resolutions
+7. User selects desired resolution/format
+8. Frontend POSTs download request to `/api/download` with URL and format_id
+9. Backend downloads video using yt-dlp, merges audio/video if needed
+10. Backend streams file as HTTP attachment to frontend
+11. Frontend triggers browser download with appropriate filename
+12. Backend schedules cleanup of temporary files after delay
 
-## How can I deploy this project?
+### Deployment Configuration
 
-Simply open [Lovable](https://lovable.dev/projects/3df718ab-d92a-46ab-837e-c365007ea84e) and click on Share -> Publish.
+**Workflows:**
+- Frontend workflow: `npm run dev` (port 5000) - Vite development server
+- Backend workflow: `python3 backend.py` (port 8000) - Flask API server
 
-## Can I connect a custom domain to my Lovable project?
+**Port Configuration:**
+- Frontend: 5000 (webview output type)
+- Backend: 8000 (console output type)
+- Both bound to 0.0.0.0 for Replit compatibility
 
-Yes, you can!
+**Integration:**
+- Frontend makes direct fetch calls to `http://localhost:8000/api/*`
+- CORS enabled on backend for all origins
+- No proxy configuration needed in development
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+### External Dependencies
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+**Frontend Dependencies:**
+- **React Router DOM** - Client-side routing
+- **TanStack Query** - Server state management and data fetching
+- **Radix UI** - Comprehensive set of accessible UI primitives (accordion, dialog, dropdown, etc.)
+- **Framer Motion** - Animation library for smooth transitions
+- **shadcn/ui** - Pre-built component library built on Radix UI
+- **Tailwind CSS** - Utility-first CSS framework
+- **Lucide React** - Icon library
+- **next-themes** - Theme management (dark/light mode)
+- **Sonner** - Toast notifications
+- **React Hook Form** - Form state management
+- **Zod** - Schema validation (via @hookform/resolvers)
+
+**Backend Dependencies:**
+- **Flask** - Web framework for Python
+- **flask-cors** - CORS handling for cross-origin requests
+- **yt-dlp** - YouTube video downloader and metadata extractor
+- **ffmpeg** (system) - Video/audio processing and merging
+
+**Development Dependencies:**
+- **Vite** - Build tool and dev server
+- **TypeScript** - Type system for JavaScript
+- **ESLint** - Code linting with TypeScript support
+- **PostCSS** - CSS processing with Autoprefixer
+- **Lovable Tagger** - Development-only component tagging plugin
+
+**Build Configuration:**
+- Development server configured for host 0.0.0.0 on port 5000
+- Allowed hosts include localhost and Replit development URLs
+- Component tagger enabled only in development mode
+- Path aliases for cleaner imports
+
+**External Services:**
+- Google Fonts (Inter font family) loaded via CDN
+- No database integration currently implemented
+- No authentication/authorization services
+- No analytics or tracking services mentioned
