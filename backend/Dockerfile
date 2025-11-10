@@ -1,10 +1,11 @@
 # Use Python 3.11 slim image
 FROM python:3.11-slim
 
-# Install ffmpeg (required by yt-dlp for video processing)
+# Install system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ffmpeg \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -19,8 +20,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Make entrypoint script executable
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Create temp directory for downloads
+RUN mkdir -p /tmp/ultra-dl
+
 # Expose port 8000
 EXPOSE 8000
 
-# Run the Flask application
-CMD ["python", "main.py"]
+# Use entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default to web service
+CMD ["web"]

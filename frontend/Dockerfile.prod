@@ -6,14 +6,15 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies (use npm install to avoid strict lockfile requirement in CI)
+RUN npm install
 
 # Copy application code
 COPY . .
 
 # Build for production
-ENV VITE_API_URL=http://localhost:8000
+ARG VITE_API_URL=http://localhost
+ENV VITE_API_URL=${VITE_API_URL}
 RUN npm run build
 
 # Production stage

@@ -4,6 +4,7 @@ import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
 import { ResolutionPicker } from "@/components/ResolutionPicker";
 import { UrlInput } from "@/components/UrlInput";
+import { VideoPreview } from "@/components/VideoPreview";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -26,61 +27,40 @@ interface VideoMeta {
   thumbnail: string;
 }
 
+interface VideoResolutionsResponse {
+  meta: VideoMeta;
+  formats: Resolution[];
+}
+
 const Index = () => {
   const [isValidated, setIsValidated] = useState(false);
   const [selectedResolution, setSelectedResolution] = useState<Resolution | null>(null);
   const [availableResolutions, setAvailableResolutions] = useState<Resolution[]>([]);
   const [videoMeta, setVideoMeta] = useState<VideoMeta | null>(null);
   const [currentUrl, setCurrentUrl] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  const API_URL = import.meta.env.VITE_API_URL;
 
-  const handleValidate = async (url: string) => {
-    setIsLoading(true);
+  const handleVideoResolutionsSuccess = (data: VideoResolutionsResponse, url: string) => {
     setCurrentUrl(url);
-    setIsValidated(false);
+    setVideoMeta(data.meta);
+    setAvailableResolutions(data.formats);
+    setIsValidated(true);
     setSelectedResolution(null);
-    setAvailableResolutions([]);
-    setVideoMeta(null);
-
-    try {
-      const response = await fetch(`${API_URL}/api/resolutions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url }),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        toast.error(error.error || "Failed to fetch video information");
-        setIsLoading(false);
-        return;
-      }
-
-      const data = await response.json();
-      setVideoMeta(data.meta);
-      setAvailableResolutions(data.formats);
-      setIsValidated(true);
-      setIsLoading(false);
-    } catch (error) {
-      console.error("Error fetching resolutions:", error);
-      toast.error(`Failed to connect to the backend. Make sure it's running.`);
-      setIsLoading(false);
-    }
   };
 
   const handleSelectResolution = (resolution: Resolution) => {
     setSelectedResolution(resolution);
   };
 
-  const handleDownload = async () => {
-    if (!selectedResolution || !currentUrl) return;
+  const handleCreateJob = async (): Promise<string | null> => {
+    if (!selectedResolution || !currentUrl) return null;
+
+    setIsDownloading(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/download`, {
+      const response = await fetch(`${API_URL}/api/v1/downloads/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -93,24 +73,27 @@ const Index = () => {
 
       if (!response.ok) {
         const error = await response.json();
-        toast.error(error.error || "Download failed");
-        return;
+        toast.error(error.error || "Failed to create download job");
+        setIsDownloading(false);
+        return null;
       }
 
-      const blob = await response.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = downloadUrl;
-      a.download = `${videoMeta?.title || "video"}.${selectedResolution.ext}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(downloadUrl);
-      document.body.removeChild(a);
-      toast.success("Download started!");
+      const data = await response.json();
+      return data.job_id;
     } catch (error) {
-      console.error("Download error:", error);
-      toast.error("Download failed. Please try again.");
+      console.error("Job creation error:", error);
+      toast.error("Failed to create download job. Please try again.");
+      setIsDownloading(false);
+      return null;
     }
+  };
+
+  const handleJobComplete = () => {
+    setIsDownloading(false);
+  };
+
+  const handleJobCancel = () => {
+    setIsDownloading(false);
   };
 
   return (
@@ -121,28 +104,33 @@ const Index = () => {
         <div className="max-w-7xl mx-auto space-y-12">
           <AdBanner position="top" />
 
-          <UrlInput onValidate={handleValidate} isLoading={isLoading} />
+          <UrlInput onSuccess={handleVideoResolutionsSuccess} disabled={isDownloading} />
 
           {isValidated && availableResolutions.length > 0 && (
             <>
               {videoMeta && (
-                <div className="text-center mb-4" data-testid="video-meta">
-                  <h2 className="text-xl font-semibold" data-testid="text-video-title">{videoMeta.title}</h2>
-                  <p className="text-sm text-muted-foreground" data-testid="text-video-uploader">{videoMeta.uploader}</p>
-                </div>
+                <VideoPreview
+                  videoId={videoMeta.id}
+                  thumbnail={videoMeta.thumbnail}
+                  title={videoMeta.title}
+                  uploader={videoMeta.uploader}
+                  duration={videoMeta.duration}
+                />
               )}
 
               <ResolutionPicker
                 onSelect={handleSelectResolution}
                 selectedResolution={selectedResolution}
                 availableResolutions={availableResolutions}
+                disabled={isDownloading}
               />
 
               <DownloadButton
-                disabled={!selectedResolution}
-                onDownload={handleDownload}
+                disabled={!selectedResolution || isDownloading}
+                onCreateJob={handleCreateJob}
                 selectedResolution={selectedResolution}
                 videoMeta={videoMeta}
+                onJobCancel={handleJobCancel}
               />
             </>
           )}

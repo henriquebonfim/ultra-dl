@@ -1,37 +1,209 @@
 services:
+  traefik:
+    image: traefik:v3.5.4
+    container_name: ultradl_traefik
+    command:
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --ping=true
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - ultradl_frontend_network
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ultradl_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    networks:
+      - ultradl_backend_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    container_name: ultradl_backend
     environment:
-      - FLASK_ENV=${FLASK_ENV}
+      - FLASK_ENV=development
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=8000
+      - FLASK_DEBUG=true
+      - API_VERSION=v1
+      - API_BASE_URL=http://backend:8000
+      - DOWNLOAD_BASE_URL=http://localhost
       - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_WORKER_CONCURRENCY=2
+      - RATE_LIMIT_DAILY=200
+      - RATE_LIMIT_HOURLY=50
+      - RATE_LIMIT_STORAGE_URL=redis://redis:6379/0
+      - SECRET_KEY=dev-secret-key-change-in-production-use-openssl-rand-hex-32
+      - CORS_ORIGINS=http://localhost,http://localhost:80,http://localhost:5000
+      - FILE_TTL_MINUTES=10
+      - JOB_TTL_SECONDS=3600
+      - TEMP_DOWNLOAD_DIR=/tmp/ultra-dl
+      - LOG_LEVEL=INFO
+      - GCS_BUCKET_NAME=
+      - GOOGLE_APPLICATION_CREDENTIALS=
+      - SOCKETIO_ENABLED=true
     volumes:
       - ./backend:/app
-      - /tmp/ultra-dl:/tmp/ultra-dl
+      - temp_downloads:/tmp/ultra-dl
     restart: unless-stopped
     networks:
-      - gateway
+      - ultradl_backend_network
+      - ultradl_frontend_network
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`localhost`) && (PathPrefix(`/api/v1`) || PathPrefix(`/health`) || PathPrefix(`/socket.io`) || PathPrefix(`/swaggerui`))"
+      - "traefik.http.routers.backend.priority=100"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+      - "traefik.docker.network=ultradl_frontend_network"
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["worker"]
+    container_name: ultradl_celery-worker
+    environment:
+      - PYTHONUNBUFFERED=1
+      - API_VERSION=v1
+      - API_BASE_URL=http://backend:8000
+      - DOWNLOAD_BASE_URL=http://localhost
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_WORKER_CONCURRENCY=2
+      - CELERY_LOG_LEVEL=INFO
+      - SECRET_KEY=dev-secret-key-change-in-production-use-openssl-rand-hex-32
+      - FILE_TTL_MINUTES=10
+      - TEMP_DOWNLOAD_DIR=/tmp/ultra-dl
+      - GCS_BUCKET_NAME=
+      - SOCKETIO_ENABLED=true
+    volumes:
+      - ./backend:/app
+      - temp_downloads:/tmp/ultra-dl
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ultradl_backend_network
+    healthcheck:
+      test: ["CMD", "celery", "-A", "celery_app.celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["beat"]
+    container_name: ultradl_celery-beat
+    environment:
+      - PYTHONUNBUFFERED=1
+      - API_VERSION=v1
+      - API_BASE_URL=http://backend:8000
+      - DOWNLOAD_BASE_URL=http://localhost
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - CELERY_LOG_LEVEL=INFO
+    volumes:
+      - ./backend:/app
+      - temp_downloads:/tmp/ultra-dl
+      - celery_beat_data:/tmp
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ultradl_backend_network
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    ports:
-      - "5000:5000"
+    container_name: ultradl_frontend
     environment:
-      - VITE_API_URL=${VITE_API_URL}
+      - NODE_ENV=development
+      - VITE_API_URL=http://localhost
+      - VITE_API_VERSION=v1
+      - API_BASE_URL=http://backend:8000
+      - VITE_ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
     volumes:
       - ./frontend:/app
-      - /app/node_modules
+      - frontend_modules:/app/node_modules
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     networks:
-      - gateway
+      - ultradl_frontend_network
+      - ultradl_backend_network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`localhost`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=5000"
+      - "traefik.docker.network=ultradl_frontend_network"
+
+volumes:
+  redis_data:
+  temp_downloads:
+  celery_beat_data:
+  frontend_modules:
 
 networks:
-  gateway:
+  ultradl_frontend_network:
+    name: ultradl_frontend_network
+    driver: bridge
+
+  ultradl_backend_network:
+    name: ultradl_backend_network
     driver: bridge

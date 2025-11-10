@@ -1,0 +1,24 @@
+# Example Terraform variables file
+# Copy this file to terraform.tfvars and fill in your values
+
+# GCP Project Configuration
+project_id = "your-gcp-project-id"
+region     = "us-central1"
+zone       = "us-central1-a"
+
+# GCS Bucket Configuration
+bucket_name     = "ultradl-downloads-temp"
+bucket_location = "US"
+
+# CORS Configuration
+# Update with your actual domain(s) in production
+cors_origins = ["*"]
+
+# Environment
+environment = "prod"
+
+# Service Account
+service_account_name = "ultradl-app-sa"
+
+# Compute Instance
+instance_name = "youtube-downloader-vm"

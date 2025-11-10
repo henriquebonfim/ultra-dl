@@ -1,363 +1,248 @@
 """
-backend.py
+main.py
 
-Single-file Flask backend for local development that:
- - Lists available video formats/resolutions for a YouTube URL (/resolutions)
- - Downloads a selected format and returns it as an HTTP attachment (/download)
+Flask backend with Celery integration for asynchronous YouTube downloading.
+This version integrates Redis for job persistence and Celery for background processing.
 
 Dependencies:
-  - Python packages: Flask, yt-dlp, flask-cors
-      pip install Flask yt-dlp flask-cors
+  - Python packages: Flask, yt-dlp, flask-cors, redis, celery
   - System: ffmpeg (must be on PATH for merging/processing)
+  - Infrastructure: Redis server
 
 Notes:
-  - Designed for local use / testing. Do NOT expose publicly without auth/rate-limiting.
-  - Uses tempfile.mkdtemp() for per-request temp directories and schedules cleanup.
+  - Uses Redis for job persistence and Celery for async processing
+  - API v1 endpoints available at /api/v1/ with Swagger docs at /api/v1/docs
 """
 
 import os
-import shutil
-import json
-import uuid
-import time
-import threading
-import tempfile
-from pathlib import Path
-from typing import Optional, Dict, Any, List
 
-from flask import Flask, request, jsonify, send_file, abort, Response
+from application.job_service import JobService
+from config.celery_config import make_celery
+from config.gcs_config import gcs_health_check, init_gcs, is_gcs_enabled
+
+# Import Celery, Redis, GCS, and SocketIO configuration
+from config.redis_config import get_redis_repository, init_redis, redis_health_check
+from config.socketio_config import init_socketio, is_socketio_enabled
+
+# Import domain services and errors
+from domain.errors import (
+    ErrorCategory,
+    create_error_response,
+)
+from domain.file_storage import FileManager, SignedUrlService
+from domain.file_storage.repositories import RedisFileRepository
+from domain.job_management import JobManager
+from domain.job_management.repositories import RedisJobRepository
+from flask import Flask, jsonify
 from flask_cors import CORS
-from yt_dlp import YoutubeDL, utils as ytdlp_utils
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+# Import WebSocket event handlers
+from websocket_events import register_socketio_events
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-API-Key"],
+        "expose_headers": ["Content-Type", "X-Total-Count"],
+        "supports_credentials": True,
+        "max_age": 3600
+    }
+})
 
-# How long to keep files after serving (seconds). Increase if you have slow clients.
-CLEANUP_DELAY_SECONDS = 30
+# Get API version from environment
+API_VERSION = os.getenv("API_VERSION", "v1")
 
-# Max allowed size for returned file in bytes (optional safety). Set to 0 to disable.
-# e.g., 0 disables check; or set to 10 * 1024**3 for 10 GiB.
-MAX_RETURN_FILE_SIZE = 0
+# Check if we're in production mode
+FLASK_ENV = os.getenv("FLASK_ENV", "development")
+IS_PRODUCTION = FLASK_ENV == "production"
 
-# YT-DLP common options for metadata-only extraction
-YTDLP_METADATA_OPTS = {
-    "quiet": True,
-    "no_warnings": True,
-    "skip_download": True,
-    "format": "best",
-    # ensure JSON-like information
-    "dump_single_json": True,
-}
+# Initialize rate limiter with Redis storage (only in production)
+if IS_PRODUCTION:
+    daily_limit = os.getenv("RATE_LIMIT_DAILY", "200")
+    hourly_limit = os.getenv("RATE_LIMIT_HOURLY", "50")
+    limiter = Limiter(
+        app=app,
+        key_func=get_remote_address,
+        default_limits=[f"{daily_limit} per day", f"{hourly_limit} per hour"],
+        storage_uri=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+        strategy="fixed-window",
+    )
+    print(f"Rate limiting ENABLED (production mode) - {daily_limit}/day, {hourly_limit}/hour")
+else:
+    # Disable rate limiting in development
+    limiter = Limiter(
+        app=app,
+        key_func=get_remote_address,
+        default_limits=[],  # No default limits
+        enabled=False,  # Disable rate limiting
+    )
+    print("Rate limiting DISABLED (development mode)")
 
-
-def schedule_cleanup(path: str, delay: int = CLEANUP_DELAY_SECONDS):
-    """
-    Remove 'path' (file or directory) after 'delay' seconds on a background thread.
-    Keeps main thread free to return the response.
-    """
-    def _cleanup():
-        try:
-            time.sleep(delay)
-            if os.path.isdir(path):
-                shutil.rmtree(path, ignore_errors=True)
-            elif os.path.exists(path):
-                os.remove(path)
-        except Exception as e:
-            app.logger.warning(f"Cleanup failed for {path}: {e}")
-
-    t = threading.Thread(target=_cleanup, daemon=True)
-    t.start()
-
-
-def safe_filename(s: str) -> str:
-    """
-    Create a filesystem-safe filename.
-    Keep it simple: strip dangerous chars and limit length.
-    """
-    keep = "".join(c for c in s if c.isalnum() or c in " .-_()")
-    return (keep[:200] or "output").strip()
+# Store limiter in app for access in blueprints
+app.limiter = limiter
 
 
-def formats_to_frontend_list(formats: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Convert raw yt-dlp 'formats' list into a simplified list for the frontend.
-    Each item contains:
-      - format_id (string)
-      - ext (mp4, webm, m4a etc)
-      - resolution (e.g., '1920x1080' or 'audio only')
-      - height (int or None) so frontend can sort by height
-      - note (additional info)
-      - filesize (int bytes or None)
-    """
-    out = []
-    for f in formats:
-        # Some formats are audio-only (vcodec == "none") or video-only (acodec == "none")
-        height = f.get("height")
-        width = f.get("width")
-        res = None
-        if height and width:
-            res = f"{width}x{height}"
-        elif height:
-            res = f"{height}p"
-        elif f.get("vcodec") == "none":
-            res = "audio only"
+# Custom error handler for rate limit exceeded (only relevant in production)
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    """Handle rate limit exceeded errors."""
+    return create_error_response(
+        ErrorCategory.RATE_LIMITED,
+        f"Rate limit exceeded: {e.description}",
+        status_code=429,
+    )
+
+
+# Initialize Redis, Celery, GCS, and SocketIO
+try:
+    init_redis()
+    celery = make_celery(app)
+    app.celery = celery
+    print("Redis and Celery initialized successfully")
+
+    # Initialize GCS (optional - system works without it)
+    gcs_initialized = init_gcs()
+    if gcs_initialized:
+        print("GCS initialized successfully")
+    else:
+        print("GCS not configured - using local file serving")
+
+    # Initialize SocketIO (optional - system falls back to polling)
+    try:
+        # Only initialize SocketIO if we plan to use it
+        socketio_enabled = os.getenv("SOCKETIO_ENABLED", "true").lower() == "true"
+        if socketio_enabled:
+            socketio = init_socketio(app)
+            app.socketio = socketio
+            # Register WebSocket event handlers
+            register_socketio_events(app)
+            print("SocketIO initialized successfully")
         else:
-            res = f.get("format_note") or "unknown"
+            socketio = None
+            print("SocketIO disabled - using polling fallback")
+    except Exception as e:
+        print(f"Warning: Could not initialize SocketIO: {e}")
+        print("WebSocket support disabled - using polling fallback")
+        socketio = None
 
-        out.append({
-            "format_id": str(f.get("format_id")),
-            "ext": f.get("ext"),
-            "resolution": res,
-            "height": height or 0,
-            "note": f.get("format_note") or "",
-            "filesize": f.get("filesize") or f.get("filesize_approx") or None,
-            "vcodec": f.get("vcodec"),
-            "acodec": f.get("acodec"),
-        })
-    # Sort descending by height (so highest resolution first)
-    out.sort(key=lambda x: (x["height"] or 0), reverse=True)
-    return out
+    # Initialize repositories
+    redis_repo = get_redis_repository()
+
+    # Initialize file manager and signed URL service
+    file_repository = RedisFileRepository(redis_repo)
+    file_manager = FileManager(file_repository)
+    signed_url_service = SignedUrlService()
+
+    # Initialize job service
+    job_repository = RedisJobRepository(redis_repo)
+    job_manager = JobManager(job_repository)
+    job_service = JobService(job_manager, file_manager)
+    app.job_service = job_service
+    app.file_manager = file_manager
+    app.signed_url_service = signed_url_service
+
+    # Register API v1 blueprint with Swagger documentation
+    from api.v1 import api_v1_bp
+
+    app.register_blueprint(api_v1_bp)
+    
+    # Apply specific rate limits to API endpoints (only in production)
+    if IS_PRODUCTION:
+        try:
+            limiter.limit("20 per minute")(app.view_functions[f"api_{API_VERSION}.videos_video_resolutions"])
+            limiter.limit("10 per minute")(app.view_functions[f"api_{API_VERSION}.downloads_download"])
+            limiter.limit("30 per minute")(app.view_functions[f"api_{API_VERSION}.jobs_job"])  # Job status polling
+            print("Specific rate limits applied to API endpoints")
+        except KeyError as e:
+            print(f"Warning: Could not apply rate limits to some endpoints: {e}")
+    else:
+        print("Skipping rate limit configuration (development mode)")
+    
+    print(
+        f"API {API_VERSION} registered at /api/{API_VERSION} with Swagger UI at /api/{API_VERSION}/docs"
+    )
+
+except Exception as e:
+    print(f"Warning: Could not initialize Redis/Celery: {e}")
+    celery = None
+    job_service = None
+    socketio = None
 
 
 @app.route("/health", methods=["GET"])
+@limiter.exempt  # Exempt health check from rate limiting
 def health():
-    return jsonify({"status": "ok", "message": "backend ready"}), 200
-
-
-@app.route("/api/resolutions", methods=["POST"])
-def resolutions():
     """
-    Accepts JSON body: {"url": "https://www.youtube.com/watch?v=..."}
-    Returns a simplified list of available formats.
+    Legacy health check endpoint for backward compatibility.
+    
+    Note: The documented health endpoint is available at /api/v1/system/health
+    in the Swagger documentation. This endpoint is kept for backward compatibility
+    and simple health checks without API versioning.
     """
-    data = request.get_json(silent=True)
-    if not data or "url" not in data:
-        return jsonify({"error": "JSON body required with 'url' field"}), 400
+    health_status = {
+        "status": "ok",
+        "message": "backend ready",
+        "redis": "unknown",
+        "celery": "unknown",
+        "gcs": "unknown",
+        "socketio": "unknown",
+    }
 
-    url = data["url"].strip()
-    if not url:
-        return jsonify({"error": "Empty URL"}), 400
-
-    # Basic URL validation (frontend should also validate)
-    if ("youtube.com" not in url) and ("youtu.be" not in url):
-        return jsonify({"error": "URL does not look like a YouTube link"}), 400
-
+    # Check Redis connectivity
     try:
-        ydl_opts = dict(YTDLP_METADATA_OPTS)
-        # Use YoutubeDL to extract info without downloading
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-        # info will contain 'formats' (list)
-        formats = info.get("formats", [])
-        simplified = formats_to_frontend_list(formats)
-        # Also include some video meta (title, duration)
-        meta = {
-            "id": info.get("id"),
-            "title": info.get("title"),
-            "uploader": info.get("uploader"),
-            "duration": info.get("duration"),
-            "thumbnail": info.get("thumbnail"),
-        }
-        return jsonify({"meta": meta, "formats": simplified}), 200
-    except ytdlp_utils.DownloadError as e:
-        app.logger.exception("yt-dlp failed to extract info")
-        return jsonify({"error": "yt-dlp failed to fetch video info", "details": str(e)}), 500
+        if redis_health_check():
+            health_status["redis"] = "connected"
+        else:
+            health_status["redis"] = "disconnected"
+            health_status["status"] = "degraded"
     except Exception as e:
-        app.logger.exception("Unexpected error in /api/resolutions")
-        return jsonify({"error": "internal_error", "message": str(e)}), 500
+        health_status["redis"] = f"error: {str(e)}"
+        health_status["status"] = "degraded"
 
+    # Check Celery availability
+    if celery is not None:
+        health_status["celery"] = "available"
+    else:
+        health_status["celery"] = "unavailable"
+        health_status["status"] = "degraded"
 
-def pick_format_id(formats_list: List[Dict[str, Any]], requested_resolution: Optional[str]) -> Optional[str]:
-    """
-    Choose a format_id based on requested_resolution string like "2160" or "4k" or full "2160p".
-    If requested_resolution is None, pick the best combined (video+audio) format if possible.
-    Strategy:
-      1. If requested_resolution present, find the highest format with height >= requested (exact or nearest lower)
-      2. Prefer formats that include both audio and video (acodec != 'none' and vcodec != 'none')
-      3. If format entries are video-only, the frontend should pass a format_id that contains '+' (video+audio) or we let yt-dlp merge
-    """
-    if not formats_list:
-        return None
-
-    # normalize requested resolution into target height integer if possible
-    target = None
-    if requested_resolution:
-        s = requested_resolution.lower().replace("p", "").replace("k", "000").strip()
-        try:
-            target = int(s)
-        except Exception:
-            target = None
-
-    # If target set, try to find exact or nearest >= target that has both audio and video
-    if target:
-        # candidates with height >= target and both codecs
-        candidates = [f for f in formats_list if (f.get("height") or 0) >= target and f.get("vcodec") != "none" and f.get("acodec") != "none"]
-        if candidates:
-            # pick smallest filesize among candidates or highest height? we'll prefer smallest height >= target
-            candidates.sort(key=lambda x: (x.get("height") or 0, -(x.get("filesize") or 0)))
-            return candidates[0]["format_id"]
-        # fallback: find nearest lower
-        lower = [f for f in formats_list if (f.get("height") or 0) < target and f.get("vcodec") != "none"]
-        if lower:
-            # choose highest available below target
-            lower.sort(key=lambda x: (x.get("height") or 0), reverse=True)
-            return lower[0]["format_id"]
-
-    # If no target or nothing found, prefer bestvideo+bestaudio combined format id
-    # Look for formats that are "full" (have both audio & video)
-    full = [f for f in formats_list if f.get("vcodec") != "none" and f.get("acodec") != "none"]
-    if full:
-        # pick the highest height from full
-        full.sort(key=lambda x: (x.get("height") or 0), reverse=True)
-        return full[0]["format_id"]
-
-    # If only video-only entries, return a value that causes yt-dlp to download bestvideo+bestaudio instead:
-    return "bestvideo+bestaudio"
-
-
-@app.route("/api/download", methods=["POST"])
-def download():
-    """
-    Downloads and returns the requested video.
-
-    Expected JSON body:
-      {
-        "url": "https://www.youtube.com/watch?v=ID",
-        "format_id": "313+140"             # optional: exact yt-dlp format_id to download
-        "resolution": "2160"               # optional: prefer 2160p/4k (used if format_id omitted)
-        "no_audio": false                  # optional: strip audio if True
-      }
-
-    Behavior:
-      - Creates a temp dir for the job
-      - Uses yt-dlp (Python API) to download the selected format into the temp dir
-      - If no_audio True, runs ffmpeg to strip audio
-      - Streams the resulting file back as attachment
-      - Schedules cleanup of temp dir after response is sent
-    """
-    data = request.get_json(silent=True)
-    if not data or "url" not in data:
-        return jsonify({"error": "JSON body required with 'url' field"}), 400
-
-    url = data["url"].strip()
-    format_id = data.get("format_id")
-    resolution_pref = data.get("resolution")
-    no_audio = bool(data.get("no_audio", False))
-
-    if ("youtube.com" not in url) and ("youtu.be" not in url):
-        return jsonify({"error": "URL does not look like a YouTube link"}), 400
-
-    # Create unique workdir
-    workdir = tempfile.mkdtemp(prefix="ytjob_")
-    workdir_path = Path(workdir)
-    app.logger.info(f"[DOWNLOAD] workdir = {workdir}")
-
+    # Check GCS availability (optional - not critical)
     try:
-        # 1) fetch metadata to list formats (so we can pick a format_id if not provided)
-        with YoutubeDL(dict(YTDLP_METADATA_OPTS)) as ydl:
-            info = ydl.extract_info(url, download=False)
-
-        raw_formats = info.get("formats", [])
-        simplified_formats = formats_to_frontend_list(raw_formats)
-
-        # If the caller didn't provide a format_id, pick one based on resolution_pref
-        chosen_format_id = format_id
-        if not chosen_format_id:
-            chosen_format_id = pick_format_id(simplified_formats, resolution_pref)
-
-        if not chosen_format_id:
-            return jsonify({"error": "Could not determine a format to download"}), 400
-
-        # 2) Prepare yt-dlp download options
-        # Use an output template inside the temp dir. Use title + random suffix for nice filename.
-        safe_title = safe_filename(info.get("title", "video"))
-        out_template = str(workdir_path / f"{safe_title}-%(id)s.%(ext)s")
-
-        # merge_output_format ensures yt-dlp will use ffmpeg to merge into this container format
-        # set 'format' to the chosen format_id (string)
-        ytdlp_download_opts = {
-            "format": chosen_format_id,
-            "outtmpl": out_template,
-            "merge_output_format": "mp4",  # final container when merging (mp4 is widely compatible)
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            # Avoid writing metadata to stderr interfering with Flask, but we log to app.logger as needed
-        }
-
-        app.logger.info(f"[DOWNLOAD] Starting yt-dlp download: format={chosen_format_id}")
-
-        # Use YoutubeDL to perform the download into our tempdir
-        with YoutubeDL(ytdlp_download_opts) as ydl:
-            # Download returns list or single id. We call download([url])
-            ydl.download([url])
-
-        # After download, find the produced media file(s) in workdir
-        files = list(workdir_path.iterdir())
-        if not files:
-            return jsonify({"error": "No files were produced by yt-dlp"}), 500
-
-        # Choose the largest media file as candidate output
-        media_files = [f for f in files if f.is_file() and f.stat().st_size > 0]
-        if not media_files:
-            return jsonify({"error": "No downloadable media files found after yt-dlp run"}), 500
-
-        # Prefer mp4/mkv/webm with largest size
-        media_files.sort(key=lambda p: p.stat().st_size, reverse=True)
-        downloaded_file = media_files[0]
-
-        # If user requested no_audio, run ffmpeg to strip audio track
-        final_file_path = downloaded_file
-        if no_audio:
-            # create an output filename
-            out_noaudio = workdir_path / f"{downloaded_file.stem}-noaudio.mp4"
-            # ffmpeg: copy video stream, discard audio (-an)
-            ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-i", str(downloaded_file),
-                "-c:v", "copy",
-                "-an",
-                str(out_noaudio)
-            ]
-            app.logger.info(f"[DOWNLOAD] Stripping audio with ffmpeg: {' '.join(ffmpeg_cmd)}")
-            rc = os.system(" ".join(map(lambda x: f"'{x}'" if ' ' in x else x, ffmpeg_cmd)))
-            if rc != 0:
-                app.logger.warning("ffmpeg returned non-zero exit while stripping audio; falling back to original file")
+        if is_gcs_enabled():
+            if gcs_health_check():
+                health_status["gcs"] = "connected"
             else:
-                final_file_path = out_noaudio
-
-        # Optional: safety check for file size
-        if MAX_RETURN_FILE_SIZE and final_file_path.stat().st_size > MAX_RETURN_FILE_SIZE:
-            # schedule cleanup and abort
-            schedule_cleanup(workdir, delay=5)
-            return jsonify({"error": "file_too_large", "size": final_file_path.stat().st_size}), 413
-
-        # Prepare streaming response using Flask send_file (streams by default)
-        # Determine a friendly filename for client download
-        download_filename = f"{safe_title}-{info.get('id')}{final_file_path.suffix}"
-        # Use send_file with conditional=False to let Flask handle streaming efficiently
-        response = send_file(
-            str(final_file_path),
-            as_attachment=True,
-            download_name=download_filename,
-            conditional=True
-        )
-
-        # Schedule cleanup of workdir after a delay so file remains for client download
-        schedule_cleanup(workdir, delay=CLEANUP_DELAY_SECONDS)
-
-        return response
-    except ytdlp_utils.DownloadError as e:
-        app.logger.exception("yt-dlp download/extract error")
-        # Ensure cleanup
-        schedule_cleanup(workdir, delay=5)
-        return jsonify({"error": "yt-dlp download failed", "details": str(e)}), 500
+                health_status["gcs"] = "disconnected"
+        else:
+            health_status["gcs"] = "not_configured"
     except Exception as e:
-        app.logger.exception("Unexpected error in /api/download")
-        schedule_cleanup(workdir, delay=5)
-        return jsonify({"error": "internal_error", "message": str(e)}), 500
+        health_status["gcs"] = f"error: {str(e)}"
+
+    # Check SocketIO availability (optional - not critical)
+    if is_socketio_enabled():
+        health_status["socketio"] = "available"
+    else:
+        health_status["socketio"] = "not_configured"
+
+    status_code = 200 if health_status["status"] == "ok" else 503
+    return jsonify(health_status), status_code
 
 
 if __name__ == "__main__":
     # Run on port 8000 (Replit allowed port) to avoid conflict with Vite frontend on 5000
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    host = os.getenv("FLASK_HOST", "0.0.0.0")
+    port = int(os.getenv("FLASK_PORT", 8000))
+    debug = os.getenv("FLASK_DEBUG", "true").lower() == "true"
+
+    # Use SocketIO.run if available, otherwise fall back to app.run
+    if is_socketio_enabled():
+        from config.socketio_config import get_socketio
+
+        socketio = get_socketio()
+        socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
+    else:
+        app.run(host=host, port=port, debug=debug)
