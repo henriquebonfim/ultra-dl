@@ -10,15 +10,16 @@ from typing import Optional
 from .entities import DownloadJob
 from .repositories import JobRepository
 from .value_objects import JobProgress
+from domain.errors import DomainError
 
 
-class JobNotFoundError(Exception):
+class JobNotFoundError(DomainError):
     """Raised when a job is not found."""
 
     pass
 
 
-class JobStateError(Exception):
+class JobStateError(DomainError):
     """Raised when an invalid state transition is attempted."""
 
     pass

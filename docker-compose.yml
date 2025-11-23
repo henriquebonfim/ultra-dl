@@ -65,9 +65,14 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - CELERY_WORKER_CONCURRENCY=2
-      - RATE_LIMIT_DAILY=200
-      - RATE_LIMIT_HOURLY=50
-      - RATE_LIMIT_STORAGE_URL=redis://redis:6379/0
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_VIDEO_ONLY_DAILY=20
+      - RATE_LIMIT_AUDIO_ONLY_DAILY=20
+      - RATE_LIMIT_VIDEO_AUDIO_DAILY=20
+      - RATE_LIMIT_TOTAL_JOBS_DAILY=60
+      - RATE_LIMIT_ENDPOINT_HOURLY=/api/v1/videos/resolutions:100
+      - RATE_LIMIT_BATCH_MINUTE=10
+      - RATE_LIMIT_WHITELIST=
       - SECRET_KEY=dev-secret-key-change-in-production-use-openssl-rand-hex-32
       - CORS_ORIGINS=http://localhost,http://localhost:80,http://localhost:5000
       - FILE_TTL_MINUTES=10

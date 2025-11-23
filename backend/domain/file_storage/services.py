@@ -4,21 +4,21 @@ File Storage Services
 Domain services for temporary file management.
 """
 
-import os
-import shutil
 from pathlib import Path
 from typing import Optional, List
 
 from .entities import DownloadedFile
 from .repositories import FileRepository
+from .storage_repository import IFileStorageRepository
+from domain.errors import DomainError
 
 
-class FileNotFoundError(Exception):
+class FileNotFoundError(DomainError):
     """Raised when a file is not found."""
     pass
 
 
-class FileExpiredError(Exception):
+class FileExpiredError(DomainError):
     """Raised when a file has expired."""
     pass
 
@@ -30,14 +30,16 @@ class FileManager:
     Coordinates file registration, token-based access, and cleanup.
     """
     
-    def __init__(self, file_repository: FileRepository):
+    def __init__(self, file_repository: FileRepository, storage_repository: IFileStorageRepository):
         """
-        Initialize FileManager with repository.
+        Initialize FileManager with repositories.
         
         Args:
             file_repository: Repository for file metadata persistence
+            storage_repository: Repository for physical file storage operations
         """
         self.file_repo = file_repository
+        self.storage_repo = storage_repository
     
     def register_file(self, file_path: str, job_id: str, filename: str, 
                      ttl_minutes: int = 10) -> DownloadedFile:
@@ -132,7 +134,7 @@ class FileManager:
         
         # Delete physical file if requested
         if delete_physical and file:
-            self._delete_physical_file(file.file_path)
+            self.storage_repo.delete(file.file_path)
         
         return metadata_deleted
     
@@ -144,6 +146,12 @@ class FileManager:
         
         Returns:
             Number of files cleaned up
+            
+        Note:
+            Silently continues on individual file cleanup failures to ensure
+            other files are still cleaned up. Failures are not logged here
+            as domain services should not have infrastructure dependencies.
+            The application layer should handle error tracking if needed.
         """
         expired_files = self.file_repo.get_expired_files()
         
@@ -154,36 +162,15 @@ class FileManager:
                 self.file_repo.delete(file.token)
                 
                 # Delete physical file
-                self._delete_physical_file(file.file_path)
+                self.storage_repo.delete(file.file_path)
                 
                 count += 1
-            except Exception as e:
-                print(f"Error cleaning up file {file.token}: {e}")
+            except Exception:
+                # Silently continue to clean up other files
+                # Application layer can track failures if needed
+                pass
         
         return count
-    
-    def _delete_physical_file(self, file_path: str) -> bool:
-        """
-        Delete physical file or directory.
-        
-        Args:
-            file_path: Path to file or directory
-            
-        Returns:
-            True if deleted, False otherwise
-        """
-        try:
-            path = Path(file_path)
-            
-            if path.is_dir():
-                shutil.rmtree(path, ignore_errors=True)
-            elif path.exists():
-                os.remove(path)
-            
-            return True
-        except Exception as e:
-            print(f"Error deleting physical file {file_path}: {e}")
-            return False
     
     def get_download_url(self, token: str, base_url: str = "/downloads") -> str:
         """
@@ -236,7 +223,7 @@ class FileManager:
         file = self.get_file_by_token(token)
         
         return {
-            "token": file.token,
+            "token": str(file.token),
             "filename": file.filename,
             "filesize": file.filesize,
             "filesize_mb": file.get_filesize_mb(),

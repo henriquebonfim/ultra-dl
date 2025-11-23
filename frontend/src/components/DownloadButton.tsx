@@ -1,9 +1,9 @@
+import { memo, useState } from "react";
 import { ProgressTracker } from "@/components/ProgressTracker";
 import { Button } from "@/components/ui/button";
 import { useJobStatusWithWebSocket } from "@/hooks/useJobStatusWithWebSocket";
 import { AnimatePresence, motion } from "framer-motion";
 import { Download } from "lucide-react";
-import { useState } from "react";
 import { toast } from "sonner";
 import { parseApiError, formatErrorForToast } from "@/lib/errors";
 
@@ -34,7 +34,7 @@ interface DownloadButtonProps {
   onJobCancel?: () => void;
 }
 
-export const DownloadButton = ({ disabled, onCreateJob, selectedResolution, videoMeta, onJobCancel }: DownloadButtonProps) => {
+const DownloadButtonComponent = ({ disabled, onCreateJob, selectedResolution, videoMeta, onJobCancel }: DownloadButtonProps) => {
   const [jobId, setJobId] = useState<string | null>(null);
   const [isCreatingJob, setIsCreatingJob] = useState(false);
 
@@ -213,3 +213,7 @@ export const DownloadButton = ({ disabled, onCreateJob, selectedResolution, vide
     </motion.div>
   );
 };
+
+DownloadButtonComponent.displayName = "DownloadButton";
+
+export const DownloadButton = memo(DownloadButtonComponent);

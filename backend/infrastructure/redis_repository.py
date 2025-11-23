@@ -45,7 +45,7 @@ class RedisRepository:
                 return self.redis.setex(redis_key, ttl, json_data)
             else:
                 return self.redis.set(redis_key, json_data)
-        except (RedisConnectionError, json.JSONEncodeError) as e:
+        except (RedisConnectionError, TypeError) as e:
             print(f"Error setting JSON data for key {key}: {e}")
             return False
     

@@ -1,14 +1,13 @@
 """
 Error Handling Module
 
-Defines error categories and user-friendly error messages for the application.
+Defines domain exceptions and error categories for the application.
+Domain exceptions are pure and have no external dependencies.
+Application exceptions can have infrastructure concerns like logging.
 """
 
-import logging
 from enum import Enum
 from typing import Any, Dict, Optional
-
-logger = logging.getLogger(__name__)
 
 
 class ErrorCategory(Enum):
@@ -117,9 +116,81 @@ ERROR_MESSAGES: Dict[ErrorCategory, Dict[str, str]] = {
 }
 
 
+# ============================================================================
+# Domain Exceptions (Pure - No External Dependencies)
+# ============================================================================
+
+class DomainError(Exception):
+    """
+    Base exception for all domain errors.
+    
+    Domain exceptions are pure and have no external dependencies.
+    They can optionally wrap original errors for context.
+    """
+    
+    def __init__(self, message: str, original_error: Exception = None):
+        """
+        Initialize domain error.
+        
+        Args:
+            message: Error message
+            original_error: Optional original exception that caused this error
+        """
+        super().__init__(message)
+        self.original_error = original_error
+
+
+class MetadataExtractionError(DomainError):
+    """
+    Raised when video metadata extraction fails.
+    
+    This is a generic domain exception that doesn't depend on
+    any specific extraction library (e.g., yt-dlp).
+    """
+    pass
+
+
+class FormatNotFoundError(DomainError):
+    """
+    Raised when a requested video format is not available.
+    
+    This occurs when a user requests a specific format that
+    doesn't exist for the given video.
+    """
+    pass
+
+
+class VideoProcessingError(DomainError):
+    """
+    Base exception for video processing errors.
+    
+    Generic error for any video processing operation that fails.
+    """
+    pass
+
+
+class InvalidUrlError(DomainError):
+    """
+    Raised when URL validation fails.
+    
+    This is typically raised by the YouTubeUrl value object.
+    """
+    pass
+
+
+# ============================================================================
+# Application Layer Exceptions (Can have infrastructure concerns)
+# ============================================================================
+
 class ApplicationError(Exception):
     """
     Base application error with category and user-friendly messaging.
+    
+    This is an application-layer concern that bridges domain errors
+    with user-facing error messages and HTTP responses.
+    
+    Note: Logging is handled by application layer event handlers,
+    not directly in this exception class.
     """
 
     def __init__(
@@ -164,105 +235,27 @@ class ApplicationError(Exception):
             "action": self.action,
         }
 
-    def log(self) -> None:
-        """Log error with technical details and context."""
-        logger.error(
-            f"[{self.category.value}] {self.title}: {self.technical_message}",
-            extra={"context": self.context},
-        )
+
+# ============================================================================
+# Note: Error categorization has been moved to application layer
+# ============================================================================
+# The categorize_ytdlp_error function has been moved to application/video_service.py
+# as _categorize_extraction_error() to maintain proper DDD layer separation.
+# Domain layer should not depend on external libraries like yt-dlp.
+# ============================================================================
 
 
-def categorize_ytdlp_error(exception: Exception) -> ErrorCategory:
-    """
-    Categorize yt-dlp exceptions into error categories.
-
-    Maps yt-dlp exception types and error messages to user-friendly error categories
-    for consistent error handling across the application.
-
-    Args:
-        exception: The yt-dlp exception to categorize
-
-    Returns:
-        ErrorCategory enum value representing the error type
-    """
-    # Import yt-dlp exceptions locally to avoid dependency issues
-    try:
-        from yt_dlp.utils import DownloadError, ExtractorError, UnavailableVideoError
-    except ImportError:
-        logger.warning("yt-dlp not available, defaulting to SYSTEM_ERROR")
-        return ErrorCategory.SYSTEM_ERROR
-
-    error_str = str(exception).lower()
-
-    # Check for specific yt-dlp exception types
-    if isinstance(exception, UnavailableVideoError):
-        return ErrorCategory.VIDEO_UNAVAILABLE
-
-    if isinstance(exception, ExtractorError):
-        if "unsupported url" in error_str or "invalid url" in error_str:
-            return ErrorCategory.INVALID_URL
-        elif "private video" in error_str or "members-only" in error_str:
-            return ErrorCategory.VIDEO_UNAVAILABLE
-        elif "this video is not available" in error_str:
-            return ErrorCategory.VIDEO_UNAVAILABLE
-        else:
-            return ErrorCategory.DOWNLOAD_FAILED
-
-    if isinstance(exception, DownloadError):
-        # Analyze download error message
-        if "http error 404" in error_str or "not found" in error_str:
-            return ErrorCategory.VIDEO_UNAVAILABLE
-        elif "http error 403" in error_str or "forbidden" in error_str:
-            # Check for geo-blocking indicators
-            if (
-                "geo" in error_str
-                or "region" in error_str
-                or "location" in error_str
-            ):
-                return ErrorCategory.GEO_BLOCKED
-            # Check for login requirements
-            elif (
-                "login" in error_str
-                or "sign in" in error_str
-                or "authenticate" in error_str
-            ):
-                return ErrorCategory.LOGIN_REQUIRED
-            else:
-                return ErrorCategory.VIDEO_UNAVAILABLE
-        elif "http error 429" in error_str or "too many requests" in error_str:
-            return ErrorCategory.PLATFORM_RATE_LIMITED
-        elif "format" in error_str and (
-            "not available" in error_str or "not found" in error_str
-        ):
-            return ErrorCategory.FORMAT_NOT_SUPPORTED
-        elif (
-            "network" in error_str
-            or "connection" in error_str
-            or "timeout" in error_str
-        ):
-            return ErrorCategory.NETWORK_ERROR
-        else:
-            return ErrorCategory.DOWNLOAD_FAILED
-
-    # Check error message content for common patterns
-    if "url" in error_str and ("invalid" in error_str or "unsupported" in error_str):
-        return ErrorCategory.INVALID_URL
-    elif "unavailable" in error_str or "private" in error_str or "deleted" in error_str:
-        return ErrorCategory.VIDEO_UNAVAILABLE
-    elif "format" in error_str and "not" in error_str:
-        return ErrorCategory.FORMAT_NOT_SUPPORTED
-    elif "too large" in error_str or "file size" in error_str:
-        return ErrorCategory.FILE_TOO_LARGE
-    elif "network" in error_str or "connection" in error_str or "timeout" in error_str:
-        return ErrorCategory.NETWORK_ERROR
-    elif "rate limit" in error_str or "too many" in error_str:
-        return ErrorCategory.PLATFORM_RATE_LIMITED
-    elif "geo" in error_str or "region" in error_str or "location" in error_str:
-        return ErrorCategory.GEO_BLOCKED
-    elif "login" in error_str or "sign in" in error_str or "authenticate" in error_str:
-        return ErrorCategory.LOGIN_REQUIRED
-    else:
-        return ErrorCategory.SYSTEM_ERROR
+class RateLimitExceededError(ApplicationError):
+    """Raised when rate limit is exceeded."""
+    
+    def __init__(
+        self,
+        category: ErrorCategory,
+        technical_message: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None
+    ):
+        super().__init__(category, technical_message, context)
+        self.http_status_code = 429
 
 
 def create_error_response(
@@ -273,6 +266,9 @@ def create_error_response(
 ) -> tuple[Dict[str, Any], int]:
     """
     Create a structured error response for API endpoints.
+    
+    Note: Logging should be handled by application layer event handlers,
+    not directly in this function.
 
     Args:
         category: Error category
@@ -284,7 +280,6 @@ def create_error_response(
         Tuple of (error_dict, status_code)
     """
     error = ApplicationError(category, technical_message, context)
-    error.log()
     return error.to_dict(), status_code
 
 

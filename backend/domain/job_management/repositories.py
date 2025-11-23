@@ -1,12 +1,12 @@
 """
 Job Management Repositories
 
-Repository interfaces and implementations for job persistence.
+Repository interface for job persistence.
+Concrete implementations are in the infrastructure layer.
 """
 
-import os
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List, Optional
 
 from .entities import DownloadJob
@@ -112,169 +112,74 @@ class JobRepository(ABC):
         """
         pass
 
-
-class RedisJobRepository(JobRepository):
-    """
-    Redis-based implementation of JobRepository.
-
-    Provides atomic operations and distributed locking for job persistence.
-    """
-
-    def __init__(self, redis_repository):
+    @abstractmethod
+    def get_many(self, job_ids: List[str]) -> List[DownloadJob]:
         """
-        Initialize with Redis repository.
+        Retrieve multiple jobs by their IDs in a single operation.
+
+        This method provides efficient batch retrieval of jobs, reducing
+        network round trips when multiple jobs need to be fetched.
 
         Args:
-            redis_repository: RedisRepository instance from infrastructure layer
+            job_ids: List of job identifiers to retrieve
+
+        Returns:
+            List of DownloadJob instances for jobs that were found.
+            Jobs that don't exist are silently omitted from the result.
+            The order of returned jobs may not match the input order.
+
+        Example:
+            >>> jobs = repository.get_many(['job-1', 'job-2', 'job-3'])
+            >>> print(f"Retrieved {len(jobs)} jobs")
         """
-        self.redis_repo = redis_repository
-        self.key_prefix = "job"
-        self.ttl = int(os.getenv("JOB_TTL_SECONDS", 3600))  # 1 hour TTL for jobs
+        pass
 
-    def save(self, job: DownloadJob) -> bool:
-        """Save or update a job in Redis."""
-        key = f"{self.key_prefix}:{job.job_id}"
-        data = job.to_dict()
-        return self.redis_repo.set_json(key, data, ttl=self.ttl)
-
-    def get(self, job_id: str) -> Optional[DownloadJob]:
-        """Retrieve a job from Redis."""
-        key = f"{self.key_prefix}:{job_id}"
-        data = self.redis_repo.get_json(key)
-
-        if data is None:
-            return None
-
-        try:
-            return DownloadJob.from_dict(data)
-        except Exception as e:
-            print(f"Error deserializing job {job_id}: {e}")
-            return None
-
-    def delete(self, job_id: str) -> bool:
-        """Delete a job from Redis."""
-        key = f"{self.key_prefix}:{job_id}"
-        return self.redis_repo.delete(key)
-
-    def update_progress(self, job_id: str, progress: JobProgress) -> bool:
+    @abstractmethod
+    def save_many(self, jobs: List[DownloadJob]) -> bool:
         """
-        Atomically update job progress using Redis transaction.
+        Save or update multiple jobs in a single atomic operation.
 
-        This ensures thread-safe progress updates from multiple workers.
+        This method provides efficient batch persistence of jobs, reducing
+        network round trips and ensuring atomicity when multiple jobs need
+        to be saved together.
+
+        Args:
+            jobs: List of DownloadJob instances to save
+
+        Returns:
+            True if all jobs were successfully saved, False if any save failed.
+            On failure, implementations should attempt to rollback changes to
+            maintain consistency.
+
+        Example:
+            >>> jobs = [job1, job2, job3]
+            >>> success = repository.save_many(jobs)
+            >>> if success:
+            ...     print("All jobs saved successfully")
         """
-        key = f"{self.key_prefix}:{job_id}"
+        pass
 
-        # Update progress and updated_at atomically
-        progress_data = progress.to_dict()
-        updated_at = datetime.utcnow().isoformat()
-
-        # Use Lua script for atomic update
-        lua_script = """
-        local key = KEYS[1]
-        local progress_json = ARGV[1]
-        local updated_at = ARGV[2]
-
-        local data = redis.call('GET', key)
-        if not data then
-            return 0
-        end
-
-        local job_data = cjson.decode(data)
-        job_data['progress'] = cjson.decode(progress_json)
-        job_data['updated_at'] = updated_at
-
-        local updated_data = cjson.encode(job_data)
-        redis.call('SET', key, updated_data)
-        redis.call('EXPIRE', key, ARGV[3])
-        return 1
+    @abstractmethod
+    def find_by_status(self, status: JobStatus, limit: int = 100) -> List[DownloadJob]:
         """
+        Find jobs by their current status.
 
-        try:
-            import json
+        This method allows querying jobs based on their status, useful for
+        monitoring, cleanup operations, or batch processing of jobs in
+        specific states.
 
-            result = self.redis_repo.redis.eval(
-                lua_script,
-                1,
-                self.redis_repo._make_key(key),
-                json.dumps(progress_data),
-                updated_at,
-                self.ttl,
-            )
-            return result == 1
-        except Exception as e:
-            print(f"Error updating progress for job {job_id}: {e}")
-            return False
+        Args:
+            status: The JobStatus to filter by (e.g., PENDING, PROCESSING, COMPLETED)
+            limit: Maximum number of jobs to return (default: 100).
+                   Prevents unbounded result sets for large datasets.
 
-    def update_status(
-        self, job_id: str, status: JobStatus, error_message: Optional[str] = None
-    ) -> bool:
+        Returns:
+            List of DownloadJob instances matching the status criteria.
+            Returns empty list if no jobs match.
+            Results are not guaranteed to be in any particular order.
+
+        Example:
+            >>> failed_jobs = repository.find_by_status(JobStatus.FAILED, limit=50)
+            >>> print(f"Found {len(failed_jobs)} failed jobs")
         """
-        Atomically update job status.
-        """
-        key = f"{self.key_prefix}:{job_id}"
-        updated_at = datetime.utcnow().isoformat()
-
-        # Use Lua script for atomic update
-        lua_script = """
-        local key = KEYS[1]
-        local status = ARGV[1]
-        local updated_at = ARGV[2]
-        local error_message = ARGV[3]
-
-        local data = redis.call('GET', key)
-        if not data then
-            return 0
-        end
-
-        local job_data = cjson.decode(data)
-        job_data['status'] = status
-        job_data['updated_at'] = updated_at
-        if error_message ~= '' then
-            job_data['error_message'] = error_message
-        end
-
-        local updated_data = cjson.encode(job_data)
-        redis.call('SET', key, updated_data)
-        redis.call('EXPIRE', key, ARGV[4])
-        return 1
-        """
-
-        try:
-            result = self.redis_repo.redis.eval(
-                lua_script,
-                1,
-                self.redis_repo._make_key(key),
-                status.value,
-                updated_at,
-                error_message or "",
-                self.ttl,
-            )
-            return result == 1
-        except Exception as e:
-            print(f"Error updating status for job {job_id}: {e}")
-            return False
-
-    def get_expired_jobs(self, expiration_time: timedelta) -> List[str]:
-        """
-        Get list of expired job IDs.
-
-        Note: With Redis TTL, jobs are automatically deleted.
-        This method finds jobs that are old but not yet expired by TTL.
-        """
-        pattern = f"{self.key_prefix}:*"
-        keys = self.redis_repo.get_keys_by_pattern(pattern)
-
-        expired_jobs = []
-        cutoff_time = datetime.utcnow() - expiration_time
-
-        for key in keys:
-            job = self.get(key.replace(f"{self.key_prefix}:", ""))
-            if job and job.updated_at < cutoff_time and job.is_terminal():
-                expired_jobs.append(job.job_id)
-
-        return expired_jobs
-
-    def exists(self, job_id: str) -> bool:
-        """Check if job exists in Redis."""
-        key = f"{self.key_prefix}:{job_id}"
-        return self.redis_repo.exists(key)
+        pass

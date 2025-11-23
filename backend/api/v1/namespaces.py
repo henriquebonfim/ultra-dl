@@ -7,12 +7,14 @@ from application.video_service import VideoService
 from config.gcs_config import gcs_health_check, is_gcs_enabled
 from config.redis_config import redis_health_check
 from config.socketio_config import is_socketio_enabled
-from domain.errors import ApplicationError, ErrorCategory, categorize_ytdlp_error, create_error_response
+from domain.errors import ApplicationError, ErrorCategory, RateLimitExceededError, MetadataExtractionError, create_error_response
+from domain.file_storage.services import FileExpiredError, FileNotFoundError as DomainFileNotFoundError
 from domain.job_management import JobNotFoundError
 from domain.video_processing import InvalidUrlError, VideoProcessingError
 from flask import current_app, request
 from flask_restx import Namespace, Resource
 
+from api.rate_limit_decorator import rate_limit
 from api.v1.models import (
     download_request,
     error_response,
@@ -39,6 +41,7 @@ class VideoResolutions(Resource):
     @video_ns.response(200, "Success", resolutions_response)
     @video_ns.response(400, "Bad Request", error_response)
     @video_ns.response(429, "Too Many Requests", error_response)
+    @rate_limit(limit_types=['hourly'])
     def post(self):
         """
         Get available video formats and resolutions
@@ -69,11 +72,19 @@ class VideoResolutions(Resource):
                 str(e),
                 status_code=400
             )
-        except VideoProcessingError as e:
-            # Categorize the underlying yt-dlp error
-            category = categorize_ytdlp_error(e)
+        except MetadataExtractionError as e:
+            # Use VideoService to categorize the error
+            video_service = VideoService()
+            category = video_service._categorize_extraction_error(e)
             return create_error_response(
                 category,
+                str(e),
+                status_code=400
+            )
+        except VideoProcessingError as e:
+            # Generic video processing error
+            return create_error_response(
+                ErrorCategory.SYSTEM_ERROR,
                 str(e),
                 status_code=400
             )
@@ -279,6 +290,32 @@ class Download(Resource):
                     status_code=400
                 )
             
+            # Extract client IP and determine video type
+            client_ip = _extract_client_ip(request)
+            video_type = _determine_video_type(format_id)
+            
+            # Check rate limits (Requirement 3, 4, 6)
+            rate_limit_service = _get_rate_limit_service()
+            rate_limit_entities = []
+            
+            if rate_limit_service:
+                try:
+                    rate_limit_entities = rate_limit_service.check_download_limits(
+                        client_ip,
+                        video_type
+                    )
+                except RateLimitExceededError as e:
+                    # Log rate limit violation (Requirement 9.3)
+                    current_app.logger.info(
+                        f"Rate limit exceeded for {client_ip}: "
+                        f"{e.context.get('limit_type', 'unknown')}"
+                    )
+                    
+                    # Re-raise to be handled by global error handler
+                    # Store context in exception for error handler to use
+                    e.rate_limit_context = e.context
+                    raise e
+            
             # Get job_service from app context
             job_service = current_app.job_service
             job_data = job_service.create_download_job(url, format_id)
@@ -313,8 +350,20 @@ class Download(Resource):
                     status_code=503
                 )
 
-            return job_data, 202
+            # Add rate limit headers from most restrictive entity (Requirement 10.5)
+            response_data = job_data
+            response_code = 202
+            response_headers = {}
+            
+            if rate_limit_entities:
+                most_restrictive = rate_limit_service.get_most_restrictive_entity(rate_limit_entities)
+                response_headers = most_restrictive.to_headers()
+            
+            return response_data, response_code, response_headers
 
+        except RateLimitExceededError as e:
+            # Re-raise to be handled by global error handler
+            raise
         except ApplicationError as e:
             return create_error_response(
                 e.category,
@@ -416,11 +465,20 @@ class DownloadFile(Resource):
                 mimetype="application/octet-stream",
             )
 
-        except Exception as e:
+        except FileExpiredError as e:
+            current_app.logger.warning(
+                f"[DOWNLOAD_FILE_V1] File expired for token {token[:8]}"
+            )
+            return create_error_response(
+                ErrorCategory.FILE_EXPIRED,
+                "File has expired. Please download the video again.",
+                status_code=410
+            )
+        except (DomainFileNotFoundError, Exception) as e:
             error_str = str(e).lower()
 
-            # Handle specific exceptions
-            if "not found" in error_str:
+            # Handle file not found
+            if isinstance(e, DomainFileNotFoundError) or "not found" in error_str:
                 current_app.logger.warning(
                     f"[DOWNLOAD_FILE_V1] File not found for token {token[:8]}"
                 )
@@ -428,15 +486,6 @@ class DownloadFile(Resource):
                     ErrorCategory.FILE_NOT_FOUND,
                     "File not found or token invalid",
                     status_code=404
-                )
-            elif "expired" in error_str:
-                current_app.logger.warning(
-                    f"[DOWNLOAD_FILE_V1] File expired for token {token[:8]}"
-                )
-                return create_error_response(
-                    ErrorCategory.FILE_EXPIRED,
-                    "File has expired. Please download the video again.",
-                    status_code=410
                 )
             else:
                 current_app.logger.exception(
@@ -517,3 +566,95 @@ class Health(Resource):
 
         status_code = 200 if health_status["status"] == "ok" else 503
         return health_status, status_code
+
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def _extract_client_ip(request) -> str:
+    """
+    Extract client IP from request.
+    
+    Checks X-Forwarded-For header first (for proxy/load balancer),
+    then falls back to remote_addr for direct connections.
+    
+    Args:
+        request: Flask request object
+    
+    Returns:
+        Client IP address as string
+    """
+    # Check X-Forwarded-For header (set by proxies/load balancers)
+    forwarded_for = request.headers.get('X-Forwarded-For')
+    if forwarded_for:
+        # Get first IP in chain (original client)
+        # Format: "client, proxy1, proxy2"
+        return forwarded_for.split(',')[0].strip()
+    
+    # Fallback to direct connection IP
+    return request.remote_addr or '127.0.0.1'
+
+
+def _determine_video_type(format_id: str) -> str:
+    """
+    Determine video type from format_id.
+    
+    Parses the format_id to determine if it's video-only, audio-only,
+    or video-with-audio based on common YouTube format patterns.
+    
+    Args:
+        format_id: YouTube format identifier (e.g., "137+140", "140", "137")
+    
+    Returns:
+        Video type: 'video-only', 'audio-only', or 'video-audio'
+    
+    Requirements: 3.5
+    """
+    # Format IDs with '+' indicate combined video+audio
+    if '+' in format_id:
+        return 'video-audio'
+    
+    # Common combined video+audio format IDs (legacy formats)
+    # These are older formats that include both video and audio
+    combined_formats = ['18', '22', '37', '38', '43', '44', '45', '46']
+    if format_id in combined_formats:
+        return 'video-audio'
+    
+    # Common audio-only format IDs (140, 139, 249, 250, 251, etc.)
+    # Audio formats typically start with 1xx (m4a) or 2xx (webm/opus)
+    audio_formats = ['140', '139', '249', '250', '251', '171', '172']
+    if format_id in audio_formats or format_id.startswith('audio'):
+        return 'audio-only'
+    
+    # Check if format_id contains 'audio' keyword
+    if 'audio' in format_id.lower():
+        return 'audio-only'
+    
+    # Check if format_id contains 'video' keyword
+    if 'video' in format_id.lower():
+        return 'video-only'
+    
+    # Default to video-only for numeric format IDs
+    # (most video-only formats are in the 133-299 range)
+    return 'video-only'
+
+
+def _get_rate_limit_service():
+    """
+    Get rate limit service from DI container.
+    
+    Returns:
+        RateLimitService instance or None if not available
+    """
+    if not hasattr(current_app, 'container') or current_app.container is None:
+        current_app.logger.warning("DI container not available for rate limiting")
+        return None
+    
+    try:
+        from application.rate_limit_service import RateLimitService
+        return current_app.container.resolve(RateLimitService)
+    except Exception as e:
+        current_app.logger.warning(f"Rate limit service not available: {e}")
+        return None

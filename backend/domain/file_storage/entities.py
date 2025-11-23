@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
-import secrets
+
+from .value_objects import DownloadToken
 
 
 @dataclass
@@ -19,7 +20,7 @@ class DownloadedFile:
     Manages file metadata and token-based access control.
     """
     file_path: str
-    token: str
+    token: DownloadToken
     job_id: str
     filename: str
     expires_at: datetime
@@ -42,7 +43,7 @@ class DownloadedFile:
             New DownloadedFile instance
         """
         now = datetime.utcnow()
-        token = cls._generate_token()
+        token = DownloadToken.generate()
         expires_at = now + timedelta(minutes=ttl_minutes)
         
         # Get filesize if file exists
@@ -63,19 +64,6 @@ class DownloadedFile:
             created_at=now,
             filesize=filesize
         )
-    
-    @staticmethod
-    def _generate_token(length: int = 32) -> str:
-        """
-        Generate a cryptographically secure random token.
-        
-        Args:
-            length: Token length in bytes (default: 32)
-            
-        Returns:
-            URL-safe token string
-        """
-        return secrets.token_urlsafe(length)
     
     def is_expired(self) -> bool:
         """
@@ -116,7 +104,7 @@ class DownloadedFile:
         Returns:
             Full download URL
         """
-        url = f"{base_url}/{self.token}"
+        url = f"{base_url}/{str(self.token)}"
         if api_base_url:
             return f"{api_base_url.rstrip('/')}{url}"
         return url
@@ -148,7 +136,7 @@ class DownloadedFile:
         """Convert to dictionary for serialization."""
         return {
             "file_path": self.file_path,
-            "token": self.token,
+            "token": str(self.token),
             "job_id": self.job_id,
             "filename": self.filename,
             "expires_at": self.expires_at.isoformat(),
@@ -159,9 +147,13 @@ class DownloadedFile:
     @classmethod
     def from_dict(cls, data: dict) -> 'DownloadedFile':
         """Create DownloadedFile from dictionary."""
+        # Convert string token to DownloadToken value object
+        token_str = data["token"]
+        token_vo = DownloadToken(token_str)
+        
         return cls(
             file_path=data["file_path"],
-            token=data["token"],
+            token=token_vo,
             job_id=data["job_id"],
             filename=data["filename"],
             expires_at=datetime.fromisoformat(data["expires_at"]),

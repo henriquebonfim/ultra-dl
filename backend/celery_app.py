@@ -2,31 +2,16 @@
 Celery Application Instance
 
 Creates the Celery app instance for use by workers and beat scheduler.
+Uses the app factory to ensure all services are properly initialized.
 """
 
-from config.celery_config import make_celery
-from config.redis_config import init_redis
-from flask import Flask
+from app_factory import create_app
 
+# Create Flask app with all services initialized (including dependency container)
+flask_app = create_app()
 
-def create_app():
-    """Create Flask app with Celery integration."""
-    app = Flask(__name__)
-
-    # Initialize Redis
-    init_redis()
-
-    # Create Celery instance
-    celery = make_celery(app)
-
-    # Store celery instance on app for access in routes
-    app.celery = celery
-
-    return app, celery
-
-
-# Create app and celery instances
-flask_app, celery_app = create_app()
+# Get Celery instance from Flask app
+celery_app = flask_app.celery
 
 # Register task module imports on the Celery instance by name to avoid
 # importing task modules at module-import time (which caused a circular

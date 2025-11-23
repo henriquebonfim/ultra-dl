@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 import re
+from domain.errors import InvalidUrlError
 
 
 class FormatType(Enum):
@@ -15,11 +16,6 @@ class FormatType(Enum):
     VIDEO_AUDIO = "video+audio"
     VIDEO_ONLY = "video_only"
     AUDIO_ONLY = "audio_only"
-
-
-class InvalidUrlError(ValueError):
-    """Raised when a YouTube URL is invalid."""
-    pass
 
 
 @dataclass(frozen=True)
@@ -72,6 +68,62 @@ class YouTubeUrl:
                 return match.group(1)
         
         return None
+    
+    def __str__(self) -> str:
+        return self.value
+
+
+class InvalidFormatIdError(ValueError):
+    """Raised when a format ID is invalid."""
+    pass
+
+
+@dataclass(frozen=True)
+class FormatId:
+    """
+    Value object representing a validated yt-dlp format identifier.
+    
+    Supports:
+    - Numeric formats: "137", "140"
+    - Combined formats: "137+140", "bestvideo+bestaudio"
+    - Keyword formats: "best", "worst", "bestaudio", "bestvideo"
+    """
+    value: str
+    
+    def __post_init__(self):
+        if not self._is_valid():
+            raise InvalidFormatIdError(f"Invalid format ID: {self.value}")
+    
+    def _is_valid(self) -> bool:
+        """
+        Validate format ID pattern.
+        
+        Valid patterns:
+        - Numeric: 137, 140, 251
+        - Combined: 137+140, bestvideo+bestaudio
+        - Keywords: best, worst, bestaudio, bestvideo, worstaudio, worstvideo
+        """
+        if not self.value or not isinstance(self.value, str):
+            return False
+        
+        # Keyword formats
+        keywords = [
+            'best', 'worst', 
+            'bestaudio', 'bestvideo',
+            'worstaudio', 'worstvideo'
+        ]
+        
+        if self.value in keywords:
+            return True
+        
+        # Numeric or combined formats
+        # Pattern: one or more groups of digits or keywords separated by '+'
+        pattern = r'^(\d+|best|worst|bestaudio|bestvideo|worstaudio|worstvideo)(\+(\d+|best|worst|bestaudio|bestvideo|worstaudio|worstvideo))*$'
+        return bool(re.match(pattern, self.value))
+    
+    def is_combined(self) -> bool:
+        """Check if this is a combined format (contains '+')."""
+        return '+' in self.value
     
     def __str__(self) -> str:
         return self.value

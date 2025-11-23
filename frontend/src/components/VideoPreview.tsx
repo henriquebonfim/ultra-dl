@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { motion } from "framer-motion";
 import { Play, AlertCircle, Clock, User } from "lucide-react";
 
@@ -37,7 +37,7 @@ const formatDuration = (seconds: number): string => {
   return `${minutes}:${secs.toString().padStart(2, '0')}`;
 };
 
-export const VideoPreview = ({ videoId, thumbnail, title, uploader, duration }: VideoPreviewProps) => {
+const VideoPreviewComponent = ({ videoId, thumbnail, title, uploader, duration }: VideoPreviewProps) => {
   const [showEmbed, setShowEmbed] = useState(false);
   const [embedError, setEmbedError] = useState(false);
 
@@ -136,3 +136,7 @@ export const VideoPreview = ({ videoId, thumbnail, title, uploader, duration }: 
     </motion.div>
   );
 };
+
+VideoPreviewComponent.displayName = "VideoPreview";
+
+export const VideoPreview = memo(VideoPreviewComponent);

@@ -23,8 +23,29 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.env.prod
+.env.local
+.env.*.local
 
+# Python
 __pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.coverage
+.coverage
+htmlcov/
+coverage_output.txt
+*.egg-info/
+.eggs/
+.tox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Kiro artifacts
 .kiro
 
 # Terraform files
@@ -41,9 +62,17 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
-# Service account keys
+# Service account keys and credentials
 service-account-key.json
-*.json
+gcs-credentials.json
+*-credentials.json
+
+# Allow specific JSON config files
+!gcs-lifecycle.json
+!package.json
+!package-lock.json
+!tsconfig*.json
+!components.json
 
 # Backup files
 *.backup

@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import { AdBanner } from "@/components/AdBanner";
 import { DownloadButton } from "@/components/DownloadButton";
 import { Footer } from "@/components/Footer";
@@ -5,7 +6,6 @@ import { Header } from "@/components/Header";
 import { ResolutionPicker } from "@/components/ResolutionPicker";
 import { UrlInput } from "@/components/UrlInput";
 import { VideoPreview } from "@/components/VideoPreview";
-import { useState } from "react";
 import { toast } from "sonner";
 
 interface Resolution {
@@ -42,19 +42,22 @@ const Index = () => {
 
   const API_URL = import.meta.env.VITE_API_URL;
 
-  const handleVideoResolutionsSuccess = (data: VideoResolutionsResponse, url: string) => {
+  // Memoize event handler to prevent re-renders of UrlInput
+  const handleVideoResolutionsSuccess = useCallback((data: VideoResolutionsResponse, url: string) => {
     setCurrentUrl(url);
     setVideoMeta(data.meta);
     setAvailableResolutions(data.formats);
     setIsValidated(true);
     setSelectedResolution(null);
-  };
+  }, []);
 
-  const handleSelectResolution = (resolution: Resolution) => {
+  // Memoize event handler to prevent re-renders of ResolutionPicker
+  const handleSelectResolution = useCallback((resolution: Resolution) => {
     setSelectedResolution(resolution);
-  };
+  }, []);
 
-  const handleCreateJob = async (): Promise<string | null> => {
+  // Memoize event handler to prevent re-renders of DownloadButton
+  const handleCreateJob = useCallback(async (): Promise<string | null> => {
     if (!selectedResolution || !currentUrl) return null;
 
     setIsDownloading(true);
@@ -86,15 +89,17 @@ const Index = () => {
       setIsDownloading(false);
       return null;
     }
-  };
+  }, [API_URL, currentUrl, selectedResolution]);
 
-  const handleJobComplete = () => {
+  // Memoize event handler to prevent re-renders of DownloadButton
+  const handleJobComplete = useCallback(() => {
     setIsDownloading(false);
-  };
+  }, []);
 
-  const handleJobCancel = () => {
+  // Memoize event handler to prevent re-renders of DownloadButton
+  const handleJobCancel = useCallback(() => {
     setIsDownloading(false);
-  };
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col">

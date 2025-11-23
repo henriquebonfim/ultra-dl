@@ -5,6 +5,7 @@ Handles YouTube URL validation, metadata extraction, and format selection.
 """
 
 from .entities import VideoFormat, VideoMetadata
+from .repositories import IVideoCacheRepository
 from .services import VideoProcessingError, VideoProcessor
 from .value_objects import FormatType, InvalidUrlError, YouTubeUrl
 
@@ -16,4 +17,5 @@ __all__ = [
     "VideoProcessor",
     "InvalidUrlError",
     "VideoProcessingError",
+    "IVideoCacheRepository",
 ]

@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Video, FileVideo, Music, Check, Info } from "lucide-react";
 import {
@@ -146,19 +147,27 @@ const getCompatibilityNote = (res: Resolution): string => {
   return "Standard format";
 };
 
-export const ResolutionPicker = ({ onSelect, selectedResolution, availableResolutions, disabled = false }: ResolutionPickerProps) => {
-  const filteredResolutions = availableResolutions.filter(
-    res => res.vcodec !== "none" || res.acodec !== "none"
-  );
+const ResolutionPickerComponent = ({ onSelect, selectedResolution, availableResolutions, disabled = false }: ResolutionPickerProps) => {
+  // Memoize filtered resolutions to avoid recalculating on every render
+  const filteredResolutions = useMemo(() => {
+    return availableResolutions.filter(
+      res => res.vcodec !== "none" || res.acodec !== "none"
+    );
+  }, [availableResolutions]);
   
-  const groupedFormats = groupFormatsByType(filteredResolutions);
+  // Memoize grouped formats to avoid expensive sorting on every render
+  const groupedFormats = useMemo(() => {
+    return groupFormatsByType(filteredResolutions);
+  }, [filteredResolutions]);
   
-  // Determine which groups to show (only non-empty groups)
-  const groupsToShow = [
-    FormatType.VIDEO_AUDIO,
-    FormatType.VIDEO_ONLY,
-    FormatType.AUDIO_ONLY
-  ].filter(type => groupedFormats[type].length > 0);
+  // Memoize groups to show to avoid filtering on every render
+  const groupsToShow = useMemo(() => {
+    return [
+      FormatType.VIDEO_AUDIO,
+      FormatType.VIDEO_ONLY,
+      FormatType.AUDIO_ONLY
+    ].filter(type => groupedFormats[type].length > 0);
+  }, [groupedFormats]);
 
   return (
     <TooltipProvider>
@@ -291,3 +300,7 @@ export const ResolutionPicker = ({ onSelect, selectedResolution, availableResolu
     </TooltipProvider>
   );
 };
+
+ResolutionPickerComponent.displayName = "ResolutionPicker";
+
+export const ResolutionPicker = memo(ResolutionPickerComponent);

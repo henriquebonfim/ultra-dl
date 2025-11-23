@@ -1,8 +1,8 @@
+import { memo, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { motion } from "framer-motion";
 import { CheckCircle2, Download, Loader2, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
 import { parseApiError } from "@/lib/errors";
 import { ErrorCard } from "@/components/ErrorCard";
 
@@ -67,7 +67,7 @@ const formatFilesize = (bytes: number | null | undefined): string => {
   return `${gb.toFixed(2)} GB`;
 };
 
-export const ProgressTracker = ({
+const ProgressTrackerComponent = ({
   jobId,
   status,
   progress,
@@ -86,6 +86,16 @@ export const ProgressTracker = ({
   const [hasExpired, setHasExpired] = useState(false);
   const [isExploding, setIsExploding] = useState(false);
   const [shouldHide, setShouldHide] = useState(false);
+
+  // Memoize formatted ETA to avoid recalculating on every render
+  const formattedETA = useMemo(() => {
+    return formatETA(progress?.eta);
+  }, [progress?.eta]);
+
+  // Memoize formatted speed to avoid recalculating on every render
+  const displaySpeed = useMemo(() => {
+    return progress?.speed || "Calculating speed...";
+  }, [progress?.speed]);
 
   // Countdown timer using time_remaining from API
   useEffect(() => {
@@ -219,8 +229,8 @@ export const ProgressTracker = ({
           <Progress value={progress.percentage} className="h-3" />
 
           <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <span>{progress.speed || "Calculating speed..."}</span>
-            <span>ETA: {formatETA(progress.eta)}</span>
+            <span>{displaySpeed}</span>
+            <span>ETA: {formattedETA}</span>
           </div>
 
           {onDelete && (
@@ -363,3 +373,7 @@ export const ProgressTracker = ({
     </motion.div>
   );
 };
+
+ProgressTrackerComponent.displayName = "ProgressTracker";
+
+export const ProgressTracker = memo(ProgressTrackerComponent);

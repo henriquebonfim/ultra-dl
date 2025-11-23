@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { defineConfig } from "vite";
+import { visualizer } from "rollup-plugin-visualizer";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -25,11 +26,47 @@ export default defineConfig(({ mode }) => {
         }
       }
     },
-    plugins: [react(), mode === "development"].filter(Boolean),
+    plugins: [
+      react(),
+      mode === "development",
+      // Bundle analysis with gzip size tracking
+      visualizer({
+        filename: './dist/stats.html',
+        open: false,
+        gzipSize: true,
+        brotliSize: false,
+      })
+    ].filter(Boolean),
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
       },
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            // Separate vendor code into logical chunks for better caching
+            'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+            'ui-vendor': [
+              '@radix-ui/react-progress',
+              '@radix-ui/react-slot',
+              '@radix-ui/react-toast',
+              '@radix-ui/react-tooltip',
+              'lucide-react',
+              'framer-motion',
+              'next-themes',
+              'sonner'
+            ],
+            'query-vendor': ['@tanstack/react-query'],
+            'socket-vendor': ['socket.io-client'],
+          },
+        },
+      },
+      // Warn if chunk exceeds 500KB
+      chunkSizeWarningLimit: 500,
+      // Enable tree shaking for unused code elimination
+      minify: 'esbuild',
     },
     test: {
       globals: true,
