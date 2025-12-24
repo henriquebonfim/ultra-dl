@@ -1,1 +1,1 @@
-"""Integration tests for infrastructure components."""
+"""Integration tests requiring external services."""

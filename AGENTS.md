@@ -1,77 +1,70 @@
-# UltraDL - AI Agent Guidelines
+# Agent Instructions & Guidelines
 
-> **Purpose**: Root-level guidelines for AI assistants working across the entire project. For service-specific agent guidelines, see AGENTS.md in each service folder.
+This document serves as a guide for AI Agents and Developers working on the UltraDL repository.
 
----
+## Core Philosophy
+-   **Quality First**: Prioritize clean, readable, and well-tested code.
+-   **Consistency**: Adhere strictly to the established project structure (FSD for frontend, modular Flask for backend).
+-   **Stability**: Ensure all tests pass before submitting changes.
 
-## 🎯 Project Context
+## Project Structure Rules
 
-**Ultra YouTube Downloader** is a minimalist web-based YouTube video/audio downloader with:
-- **Backend**: Domain-Driven Design (DDD) with Flask + Celery
-- **Frontend**: Feature-Sliced Design (FSD) with React + TypeScript
-- **Infrastructure**: Terraform modules for GCP
+### Frontend (`/frontend`)
+**Architecture**: Feature-Sliced Design (FSD)
+-   **Do not** create "utils" or "components" folders at the root of `src`.
+-   **Do** place code in the appropriate slice:
+    -   `shared/`: UI Kit, basic helpers.
+    -   `entities/`: Business logic, domain models (e.g., `video`, `user`).
+    -   `features/`: User interactions (e.g., `download-video`, `change-settings`).
+    -   `widgets/`: Composition of features/entities (e.g., `Header`, `Footer`).
+    -   `pages/`: Full page layouts.
+-   **Strict Imports**: Access layers from top to bottom (`pages` -> `widgets` -> `features` -> `entities` -> `shared`). Avoid circular dependencies.
 
-**Key Constraints**:
-- Anonymous access only (no authentication)
-- Single URL downloads for frontend (batch only via API)
-- 5-minute file retention
-- Production-only rate limiting
-- WSL2 + Docker development environment
+### Backend (`/backend`)
+-   **Modular Design**: Keep logic separated by domain/resource.
+-   **Service Layer**: Business logic should reside in services, not directly in route handlers.
+-   **Types**: Use type hints for all Python functions.
 
----
+## 🛠 Tech Stack & Conventions
 
+### Frontend
+-   **Runtime**: Bun
+-   **Strict Mode**: TypeScript strict mode is enabled. No `any` unless absolutely necessary.
+-   **Styling**: TailwindCSS with `shadcn/ui` components. Use `clsx` and `tailwind-merge` for class manipulation.
+-   **State**: Use React Query for async data. Avoid global state stores (Redux/Zustand) unless managing complex UI state.
 
-## 🧭 Core Development Principles
+### Backend
+-   **Runtime**: Python 3.10+
+-   **Linter**: `flake8` / `black` compatible.
+-   **Async**: Use Celery for any task taking > 0.5s.
 
-**Backend (DDD)**:
-- ✅ Domain layer has ZERO external dependencies
-- ✅ Dependencies point inward (Infrastructure → Domain)
-- ✅ Use repository pattern for all data access
-- ✅ Publish domain events, don't call infrastructure directly
+## Verification Steps
 
-**Frontend (FSD)**:
-- ✅ Respect layer hierarchy: app → pages → widgets → features → entities → shared
-- ✅ No upward imports (lower layers cannot import higher layers)
-- ✅ Features are self-contained with public API (index.ts exports)
-- ✅ No feature-to-feature imports (use shared layer)
+Before declaring a task complete, run the following:
 
-**IaC (Terraform)**:
-- ✅ Use module composition (root module + child modules)
-- ✅ Remote state with locking (GCS backend)
-- ✅ Validate all input variables
-- ✅ Document all outputs clearly
+### Frontend
+1.  **Type Check**: `bun tsc --noEmit`
+2.  **Test**: `bun test`
+3.  **Lint**: `bun run lint`
 
+### Backend
+1.  **Test**: `pytest`
+2.  **Lint**: Check for obvious pep8 violations (or run formatter).
 
-## 📐 Documentation Structure
+## Common Commands
 
-This project follows a **hierarchical documentation pattern**:
+```bash
+# Start Frontend Dev
+cd frontend && bun run dev
 
-```
-root/
-├── architecture.md       ← System-wide architecture (you are here)
-├── agents.md            ← Root-level AI guidelines (this file)
-├── README.md            ← Project overview
-├── todo.md              ← Consolidated task tracker
-│
-├── backend/
-│   ├── ARCHITECTURE.md  ← Backend DDD details
-│   ├── AGENTS.md        ← Backend-specific AI guidelines
-│   ├── README.md        ← Backend service overview
-│   └── todo.md          ← Backend-specific tasks
-│
-├── frontend/
-│   ├── ARCHITECTURE.md  ← Frontend FSD details
-│   ├── AGENTS.md        ← Frontend-specific AI guidelines
-│   ├── README.md        ← Frontend service overview
-│   └── todo.md          ← Frontend-specific tasks
-│
-└── iac/
-    ├── ARCHITECTURE.md  ← Terraform module structure
-    ├── AGENTS.md        ← IaC-specific AI guidelines
-    ├── README.md        ← Infrastructure overview
-    └── todo.md          ← IaC-specific tasks
+# Start Backend Dev
+cd backend && python main.py
+
+# Run Full Stack (Docker)
+docker-compose up --build
 ```
 
-**Navigation Rule**: Always start here, then drill down to service-specific documentation.
+## Changelog
 
----
+-   When adding features, update `README.md` if user-facing.
+-   When changing architecture, update `ARCHITECTURE.md`.

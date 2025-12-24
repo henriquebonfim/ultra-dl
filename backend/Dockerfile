@@ -15,10 +15,14 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies
+RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY src ./src
+COPY app_factory.py .
+COPY celery_app.py .
+COPY main.py .
 
 # Make entrypoint script executable
 COPY entrypoint.sh /entrypoint.sh

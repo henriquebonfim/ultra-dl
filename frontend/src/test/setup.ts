@@ -1,9 +1,5 @@
-import { expect, afterEach } from 'vitest';
-import { cleanup } from '@testing-library/react';
-import * as matchers from '@testing-library/jest-dom/matchers';
+import '@testing-library/jest-dom';
+import { GlobalRegistrator } from '@happy-dom/global-registrator';
 
-expect.extend(matchers);
-
-afterEach(() => {
-  cleanup();
-});
+// Register happy-dom globals for DOM testing
+GlobalRegistrator.register();

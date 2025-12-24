@@ -37,6 +37,7 @@ __pycache__/
 *.coverage
 .coverage
 htmlcov/
+coverage_html
 coverage_output.txt
 *.egg-info/
 .eggs/
@@ -62,13 +63,9 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
-# Service account keys and credentials
-service-account-key.json
-gcs-credentials.json
-*-credentials.json
 
 # Allow specific JSON config files
-!gcs-lifecycle.json
+
 !package.json
 !package-lock.json
 !tsconfig*.json

@@ -18,7 +18,7 @@ Notes:
 import os
 
 from app_factory import create_app
-from config.socketio_config import get_socketio, is_socketio_enabled
+from src.config.socketio_config import get_socketio, is_socketio_enabled
 
 app = create_app()
 
@@ -30,7 +30,7 @@ if __name__ == "__main__":
 
     # Use SocketIO.run if available, otherwise fall back to app.run
     if is_socketio_enabled():
-        from config.socketio_config import get_socketio
+        from src.config.socketio_config import get_socketio
 
         socketio = get_socketio()
         socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)

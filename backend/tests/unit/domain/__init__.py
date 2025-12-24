@@ -1,3 +1,1 @@
-"""
-Unit tests for domain layer.
-"""
+"""Domain unit tests package."""

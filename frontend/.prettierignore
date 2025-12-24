@@ -1,0 +1,16 @@
+# Dependencies
+node_modules
+bun.lockb
+
+# Build outputs
+dist
+build
+.vite
+
+# Config files
+*.config.js
+*.config.ts
+
+# Generated files
+coverage
+*.log

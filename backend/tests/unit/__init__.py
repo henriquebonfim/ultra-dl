@@ -1,1 +1,1 @@
-"""Unit tests for domain and application logic."""
+"""Unit tests package."""

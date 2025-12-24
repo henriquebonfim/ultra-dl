@@ -4,6 +4,9 @@
 
 set -e
 
+# Add /app/src to PYTHONPATH so that application modules can be found
+export PYTHONPATH=$PYTHONPATH:/app/src
+
 case "$1" in
     "web")
         echo "Starting Flask web server..."

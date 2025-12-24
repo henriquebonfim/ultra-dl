@@ -1,25 +1,31 @@
-# Use Node.js LTS slim version as base image
-FROM node:22.16-slim
+# Stage 1: Build with Bun
+FROM oven/bun:alpine AS builder
 
-# Set working directory
 WORKDIR /app
 
 # Copy package files
-COPY package.json package-lock.json ./
+COPY package.json bun.lockb ./
 
-# Install pnpm and project dependencies
-RUN npm install
+# Install dependencies
+RUN bun install --frozen-lockfile
 
-# Copy the rest of the application code
-# In development, we'll mount the local directory as a volume,
-# but having this here helps when building the image without a volume
+# Copy source code
 COPY . .
 
-# Expose Vite development server port
-EXPOSE 5000
+# Build the application
+RUN bun run build
 
-# Set environment variable to indicate development environment
-ENV NODE_ENV=development
+# Stage 2: Serve with Nginx
+FROM nginx:alpine
 
-# Start Vite dev server with host set to 0.0.0.0 to allow external access
-CMD ["npm", "run", "dev"]
+# Copy built assets from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy Nginx configuration
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Expose port 80
+EXPOSE 80
+
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]

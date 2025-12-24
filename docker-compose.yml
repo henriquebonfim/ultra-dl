@@ -1,15 +1,17 @@
 services:
   traefik:
-    image: traefik:v3.5.4
+    image: traefik:v2.11
     container_name: ultradl_traefik
     command:
       - --api.insecure=true
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=ultradl_frontend_network
       - --entrypoints.web.address=:80
       - --ping=true
     ports:
       - "80:80"
+      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -19,7 +21,15 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8080/ping",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -43,7 +53,6 @@ services:
       - ultradl_backend_network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
       timeout: 10s
       retries: 3
 
@@ -79,8 +88,6 @@ services:
       - JOB_TTL_SECONDS=3600
       - TEMP_DOWNLOAD_DIR=/tmp/ultra-dl
       - LOG_LEVEL=INFO
-      - GCS_BUCKET_NAME=
-      - GOOGLE_APPLICATION_CREDENTIALS=
       - SOCKETIO_ENABLED=true
     volumes:
       - ./backend:/app
@@ -97,7 +104,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=Host(`localhost`) && (PathPrefix(`/api/v1`) || PathPrefix(`/health`) || PathPrefix(`/socket.io`) || PathPrefix(`/swaggerui`))"
@@ -124,7 +130,6 @@ services:
       - SECRET_KEY=dev-secret-key-change-in-production-use-openssl-rand-hex-32
       - FILE_TTL_MINUTES=10
       - TEMP_DOWNLOAD_DIR=/tmp/ultra-dl
-      - GCS_BUCKET_NAME=
       - SOCKETIO_ENABLED=true
     volumes:
       - ./backend:/app
@@ -175,6 +180,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: builder
+    command: ["bun", "run", "dev", "--host"]
     container_name: ultradl_frontend
     environment:
       - NODE_ENV=development
@@ -195,7 +202,8 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=Host(`localhost`)"
-      - "traefik.http.services.frontend.loadbalancer.server.port=5000"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.services.frontend.loadbalancer.server.port=8080"
       - "traefik.docker.network=ultradl_frontend_network"
 
 volumes:
