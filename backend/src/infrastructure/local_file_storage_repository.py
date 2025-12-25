@@ -31,12 +31,15 @@ class LocalFileStorageRepository(IFileStorageRepository):
         base_path: Base directory path for file storage operations
     """
 
-    def __init__(self, base_path: str = "/tmp/ultra-dl"):
+    def __init__(self, base_path: str = None):
+        if base_path is None:
+             import os
+             base_path = os.getenv("DOWNLOAD_DIR", "/tmp/downloaded_files")
         """
         Initialize the local file storage repository.
 
         Args:
-            base_path: Base directory for file storage (default: /tmp/ultra-dl)
+            base_path: Base directory for file storage (default: /tmp/downloaded_files)
         """
         self.base_path = Path(base_path)
         self._ensure_base_directory()

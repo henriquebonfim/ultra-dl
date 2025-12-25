@@ -2,7 +2,7 @@
 
 UltraDL is a modern, high-performance video downloader web application. It leverages the power of `yt-dlp` for robust media extraction, wrapping it in a sleek, responsive React frontend and a scalable Flask backend.
 
-<img src="./docs/image.gif"/>
+![image](image.gif)
 
 ## 🚀 Features
 

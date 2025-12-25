@@ -24,7 +24,7 @@ class StorageFactory:
             Local `IFileStorageRepository` implementation.
 
         Environment Variables:
-            DOWNLOAD_DIR: Base directory for local storage (default: /tmp/ultra-dl)
+            DOWNLOAD_DIR: Base directory for local storage (default: /tmp/downloaded_files)
         """
         return StorageFactory._create_local_storage()
 
@@ -42,7 +42,7 @@ class StorageFactory:
         try:
             from os import getenv
 
-            download_dir = getenv("DOWNLOAD_DIR", "/tmp/ultra-dl")
+            download_dir = getenv("DOWNLOAD_DIR", "/tmp/downloaded_files")
             storage = LocalFileStorageRepository(download_dir)
             print(f"Storage factory: Using local filesystem storage at {download_dir}")
             return storage

@@ -7,6 +7,7 @@ Thin wrapper that delegates to application services.
 
 import logging
 import shutil
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -81,7 +82,7 @@ def cleanup_expired_jobs(self):
             cleanup_stats["errors"].append(error_msg)
             logger.error(error_msg, exc_info=True)
 
-        # 3. Clean up orphaned temporary files in /tmp/ultra-dl
+        # 3. Clean up orphaned temporary files in /tmp/downloaded_files
         logger.info("Cleaning up orphaned temporary files...")
         try:
             orphaned_count = _cleanup_orphaned_files()
@@ -119,14 +120,14 @@ def cleanup_expired_jobs(self):
 
 def _cleanup_orphaned_files() -> int:
     """
-    Clean up orphaned temporary files in /tmp/ultra-dl.
+    Clean up orphaned temporary files in /tmp/downloaded_files.
 
     Removes files and directories older than 1 hour, and empty directories.
 
     Returns:
         Number of items cleaned up
     """
-    temp_dir = Path("/tmp/ultra-dl")
+    temp_dir = Path(os.getenv("DOWNLOAD_DIR", "/tmp/downloaded_files"))
     count = 0
 
     if not temp_dir.exists():

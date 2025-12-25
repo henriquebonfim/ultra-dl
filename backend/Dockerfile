@@ -29,7 +29,7 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Create temp directory for downloads
-RUN mkdir -p /tmp/ultra-dl
+RUN mkdir -p /tmp/downloaded_files
 
 # Expose port 8000
 EXPOSE 8000

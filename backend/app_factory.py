@@ -162,7 +162,7 @@ def _initialize_services(app: Flask) -> None:
         # Register repositories
         job_repository = RedisJobRepository(redis_repo)
         file_repository = RedisFileRepository(redis_repo)
-        storage_repository = LocalFileStorageRepository("/tmp/ultra-dl")
+        storage_repository = LocalFileStorageRepository(os.getenv("DOWNLOAD_DIR", "/tmp/downloaded_files"))
 
         # Register job archive repository
         redis_client = get_redis_client()
