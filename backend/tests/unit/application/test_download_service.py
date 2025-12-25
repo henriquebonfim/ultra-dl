@@ -145,6 +145,63 @@ class TestDownloadServiceOrchestration:
     @patch("src.application.download_service.YoutubeDL")
     @patch("src.application.download_service.emit_websocket_job_completed")
     @patch("src.application.download_service.emit_websocket_job_progress")
+    def test_execute_download_respects_format_str_for_video(
+        self,
+        mock_emit_progress,
+        mock_emit_completed,
+        mock_yt_dlp,
+        download_service,
+        mock_job_manager,
+        tmp_path,
+    ):
+        """
+        Test that execute_download respects format_str for video downloads.
+
+        Regression test for: https://github.com/user/ultra-dl/issues/bug-report
+        Verifies that merge_output_format and preferedformat are set to
+        the requested format (e.g., 'webm') instead of defaulting to 'mp4'.
+        """
+        # Arrange
+        job_id = "test-job-format"
+        url = "https://www.youtube.com/watch?v=test"
+        format_id = "best"
+        format_str = "webm"
+
+        test_file = tmp_path / "test_video.webm"
+        test_file.write_bytes(b"test content")
+
+        mock_ydl_instance = MagicMock()
+        mock_ydl_instance.extract_info.return_value = {
+            "title": "Test Video",
+            "ext": "webm",
+        }
+        mock_ydl_instance.prepare_filename.return_value = str(test_file)
+        mock_yt_dlp.return_value.__enter__.return_value = mock_ydl_instance
+
+        # Act
+        result = download_service.execute_download(
+            job_id, url, format_id, format_str=format_str
+        )
+
+        # Assert
+        assert result.success is True
+
+        # Verify call args for YoutubeDL constructor
+        call_args = mock_yt_dlp.call_args
+        params = call_args[0][0]
+
+        # Check merge_output_format
+        assert params["merge_output_format"] == "webm"
+
+        # Check postprocessors
+        postprocessors = params["postprocessors"]
+        assert len(postprocessors) == 1
+        assert postprocessors[0]["key"] == "FFmpegVideoConvertor"
+        assert postprocessors[0]["preferedformat"] == "webm"
+
+    @patch("src.application.download_service.YoutubeDL")
+    @patch("src.application.download_service.emit_websocket_job_completed")
+    @patch("src.application.download_service.emit_websocket_job_progress")
     def test_execute_download_with_trim_options(
         self,
         mock_emit_progress,

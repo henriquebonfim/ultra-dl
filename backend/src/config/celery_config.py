@@ -31,8 +31,8 @@ class CeleryConfig:
 
     # Task routing
     task_routes = {
-        "tasks.download_video": {"queue": "download_queue"},
-        "tasks.cleanup_expired_jobs": {"queue": "cleanup_queue"},
+        "src.tasks.download_video": {"queue": "download_queue"},
+        "src.tasks.cleanup_expired_jobs": {"queue": "cleanup_queue"},
     }
 
     # Queue definitions
@@ -46,7 +46,7 @@ class CeleryConfig:
     # Beat schedule for periodic tasks
     beat_schedule = {
         "cleanup-expired-jobs": {
-            "task": "tasks.cleanup_expired_jobs",
+            "task": "src.tasks.cleanup_expired_jobs",
             "schedule": 300.0,  # Run every 5 minutes
         },
     }

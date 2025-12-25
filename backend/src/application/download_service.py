@@ -354,6 +354,8 @@ class DownloadService:
                 logger.warning(f"Error in post-processor hook for job {job_id}: {e}")
 
         # Configure yt-dlp options with performance optimizations
+        target_format = format_str if format_str else "mp4"
+
         ydl_opts = {
             "format": final_format,
             "outtmpl": output_template,
@@ -362,17 +364,13 @@ class DownloadService:
             "postprocessors": [
                 {
                     "key": "FFmpegVideoConvertor",
-                    "preferedformat": (
-                        format_str if mute_video and format_str else "mp4"
-                    ),
+                    "preferedformat": target_format,
                 }
             ],
             "quiet": False,
             "no_warnings": False,
             # Performance optimizations
-            "merge_output_format": (
-                format_str if mute_video and format_str else "mp4"
-            ),  # Efficient container format
+            "merge_output_format": target_format,  # Efficient container format
             "prefer_ffmpeg": True,  # Use ffmpeg for faster processing
             # Network optimizations
             "socket_timeout": 30,  # 30s timeout for network operations

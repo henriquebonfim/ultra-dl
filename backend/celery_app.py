@@ -19,6 +19,6 @@ celery_app = flask_app.celery
 # The worker will import these modules when it starts, at which point
 # `celery_app` is already initialized and available for task decorators.
 celery_app.conf.imports = (
-    "tasks.download_task",
-    "tasks.cleanup_task",
+    "src.tasks.download_task",
+    "src.tasks.cleanup_task",
 )

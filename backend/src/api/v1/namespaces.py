@@ -282,7 +282,7 @@ class Download(Resource):
             if celery is not None:
                 try:
                     celery.send_task(
-                        "tasks.download_video",
+                        "src.tasks.download_video",
                         args=(job_id, url, format_id),
                         kwargs={
                             "start_time": start_time,

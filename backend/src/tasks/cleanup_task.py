@@ -17,7 +17,7 @@ from celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, name="tasks.cleanup_expired_jobs")
+@celery_app.task(bind=True, name="src.tasks.cleanup_expired_jobs")
 def cleanup_expired_jobs(self):
     """
     Periodic cleanup task that removes expired jobs and associated files.

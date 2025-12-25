@@ -14,7 +14,7 @@ from celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, name="tasks.download_video")
+@celery_app.task(bind=True, name="src.tasks.download_video")
 def download_video(
     self,
     job_id: str,
